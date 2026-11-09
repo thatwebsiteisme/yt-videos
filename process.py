@@ -98,6 +98,32 @@ def is_playlist_target(raw_entry: str) -> bool:
     return False
 
 
+def extract_video_id(raw_entry: str) -> str | None:
+    """Extract 11-character YouTube video ID from a raw ID or URL without network calls."""
+    entry = raw_entry.strip()
+    if YT_ID_REGEX.match(entry):
+        return entry
+    match = YT_URL_ID_REGEX.search(entry)
+    if match:
+        return match.group(1)
+    return None
+
+
+def find_existing_download(video_id: str, downloads_dir: Path) -> Path | None:
+    """Check if a completed video folder for video_id already exists locally in downloads_dir."""
+    if not video_id or not downloads_dir.exists():
+        return None
+    for folder in downloads_dir.iterdir():
+        if not folder.is_dir() or folder.name.startswith("."):
+            continue
+        if folder.name.endswith(f"_{video_id}"):
+            has_media = any(folder.glob("*.mp4")) or any(folder.glob("*.m4a"))
+            has_html = (folder / "index.html").exists()
+            if has_media and has_html:
+                return folder
+    return None
+
+
 def normalize_youtube_target(raw_entry: str) -> str:
     """Convert raw YouTube video/playlist ID or URL into a canonical YouTube URL."""
     entry = raw_entry.strip()
@@ -1167,6 +1193,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Number of parallel background post-processing workers (default: 2)",
     )
     parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force re-processing even if video folder already exists in downloads/",
+    )
+    parser.add_argument(
         "--rebuild-dashboard-only",
         action="store_true",
         help="Only regenerate the root index.html library dashboard and exit",
@@ -1182,17 +1213,17 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.urls:
-        queue: list[tuple[str, bool]] = []
+        raw_queue: list[tuple[str, bool]] = []
         for entry in args.urls:
             if is_playlist_target(entry):
                 try:
                     expanded = expand_playlist_urls(entry)
                     for v_url in expanded:
-                        queue.append((v_url, False))
+                        raw_queue.append((v_url, False))
                 except Exception as exc:
                     print(f"  [Error] Failed expanding playlist '{entry}': {exc}", file=sys.stderr)
             else:
-                queue.append((entry, False))
+                raw_queue.append((entry, False))
     else:
         raw_entries = read_queue(args.queue_file)
         if not raw_entries:
@@ -1212,7 +1243,36 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"  [Error] Failed expanding playlist '{entry}': {exc}", file=sys.stderr)
 
         entries = read_queue(args.queue_file)
-        queue = [(entry, True) for entry in entries]
+        raw_queue = [(entry, True) for entry in entries]
+
+    # Deduplicate queue & skip videos already downloaded on disk (0 network calls)
+    queue: list[tuple[str, bool]] = []
+    seen_ids: set[str] = set()
+    for entry, from_file in raw_queue:
+        vid = extract_video_id(entry)
+        if vid:
+            if vid in seen_ids:
+                print(f"  [Skip] Duplicate in queue: '{entry}'")
+                if from_file:
+                    remove_from_queue(args.queue_file, entry)
+                continue
+            seen_ids.add(vid)
+
+            if not args.force:
+                existing_folder = find_existing_download(vid, args.output_dir)
+                if existing_folder:
+                    print(
+                        f"  [Skip] Already downloaded ({existing_folder.name}) — skipping '{entry}'"
+                    )
+                    if from_file:
+                        remove_from_queue(args.queue_file, entry)
+                    continue
+        queue.append((entry, from_file))
+
+    if not queue:
+        render_root_dashboard(args.output_dir, args.queue_file)
+        print("All queued videos are already downloaded! Root index.html is up to date.")
+        return 0
 
     active_quality = args.quality or read_settings()["quality"]
     print(

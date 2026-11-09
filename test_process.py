@@ -14,6 +14,8 @@ from process import (
     build_markdown_files,
     build_structured_transcript,
     collect_downloaded_videos,
+    extract_video_id,
+    find_existing_download,
     format_timestamp,
     format_upload_date,
     group_segments_into_blocks,
@@ -276,6 +278,22 @@ def test_playlist_detection_and_queue_expansion(tmp_path: Path) -> None:
         "https://www.youtube.com/watch?v=6oVzh_SAPjk",
         "dQw4w9WgXcQ",
     ]
+
+
+def test_duplicate_detection(tmp_path: Path) -> None:
+    assert extract_video_id("6oVzh_SAPjk") == "6oVzh_SAPjk"
+    assert extract_video_id("https://www.youtube.com/watch?v=6oVzh_SAPjk") == "6oVzh_SAPjk"
+    assert extract_video_id("https://youtu.be/6oVzh_SAPjk") == "6oVzh_SAPjk"
+
+    dl_dir = tmp_path / "downloads"
+    v_dir = dl_dir / "2026-11-08_Sample_6oVzh_SAPjk"
+    v_dir.mkdir(parents=True)
+    assert find_existing_download("6oVzh_SAPjk", dl_dir) is None  # incomplete folder
+
+    (v_dir / "Sample.mp4").write_bytes(b"mp4")
+    (v_dir / "index.html").write_text("<html></html>", encoding="utf-8")
+    assert find_existing_download("6oVzh_SAPjk", dl_dir) == v_dir
+
 
 
 
