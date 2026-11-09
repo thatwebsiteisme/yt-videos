@@ -17,6 +17,7 @@ from process import (
     format_timestamp,
     format_upload_date,
     group_segments_into_blocks,
+    is_playlist_target,
     normalize_youtube_target,
     parse_duration_seconds,
     parse_json3_subtitles,
@@ -25,6 +26,7 @@ from process import (
     remove_from_queue,
     render_html_viewer,
     render_root_dashboard,
+    replace_playlist_in_queue,
     save_settings,
     slugify,
 )
@@ -241,6 +243,40 @@ def test_quality_settings_default_720p(tmp_path: Path) -> None:
     assert read_settings(sfile) == {"quality": "1080p"}
     save_settings("invalid_preset", sfile)
     assert read_settings(sfile) == {"quality": "720p"}
+
+
+def test_playlist_detection_and_queue_expansion(tmp_path: Path) -> None:
+    assert is_playlist_target("https://www.youtube.com/playlist?list=PL1234567890abcdef") is True
+    assert is_playlist_target("https://www.youtube.com/watch?v=jNQXAC9IVRw&list=PL1234567890abcdef") is True
+    assert is_playlist_target("PL1234567890abcdef") is True
+    assert is_playlist_target("jNQXAC9IVRw") is False
+    assert is_playlist_target("https://www.youtube.com/watch?v=jNQXAC9IVRw") is False
+
+    assert (
+        normalize_youtube_target("PL1234567890abcdef")
+        == "https://www.youtube.com/playlist?list=PL1234567890abcdef"
+    )
+
+    qfile = tmp_path / "urls.txt"
+    qfile.write_text(
+        "# Queue\nPL1234567890abcdef\ndQw4w9WgXcQ\n",
+        encoding="utf-8",
+    )
+    replace_playlist_in_queue(
+        qfile,
+        "PL1234567890abcdef",
+        [
+            "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+            "https://www.youtube.com/watch?v=6oVzh_SAPjk",
+        ],
+    )
+    entries = read_queue(qfile)
+    assert entries == [
+        "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+        "https://www.youtube.com/watch?v=6oVzh_SAPjk",
+        "dQw4w9WgXcQ",
+    ]
+
 
 
 

@@ -406,7 +406,7 @@
           <span>📥 Download Queue (<code>urls.txt</code>)</span>
           <span id="queueCount" style="font-size: 0.8rem; color: var(--muted);"></span>
         </h2>
-        <textarea id="urlsInput" placeholder="Paste YouTube URLs or 11-char Video IDs here (one per line)...">{{ queue_text }}</textarea>
+        <textarea id="urlsInput" placeholder="Paste YouTube Video URLs, Playlist URLs, or IDs here (one per line)...">{{ queue_text }}</textarea>
         <div class="btn-row">
           <select id="qualitySelect" class="sort-select" aria-label="Download quality" onchange="saveQueueOnly()">
             {% for key, preset in (quality_presets or {}).items() %}

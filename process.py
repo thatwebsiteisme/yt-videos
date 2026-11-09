@@ -62,9 +62,11 @@ QUALITY_PRESETS: dict[str, dict[str, str]] = {
 }
 
 YT_ID_REGEX = re.compile(r"^[A-Za-z0-9_-]{11}$")
+YT_PLAYLIST_ID_REGEX = re.compile(r"^(?:PL|UU|LL|FL|OLAK5uy_)[A-Za-z0-9_-]{10,}$")
 YT_URL_ID_REGEX = re.compile(
     r"(?:v=|youtu\.be/|shorts/|embed/|live/)([A-Za-z0-9_-]{11})"
 )
+YT_PLAYLIST_URL_REGEX = re.compile(r"[?&]list=([A-Za-z0-9_-]+)")
 PTS_TIME_REGEX = re.compile(r"pts_time:([0-9.]+)")
 
 
@@ -80,8 +82,20 @@ def ensure_ffmpeg_in_path() -> None:
         pass
 
 
+def is_playlist_target(raw_entry: str) -> bool:
+    """Return True if raw_entry is a YouTube playlist URL or raw playlist ID."""
+    entry = raw_entry.strip()
+    if not entry:
+        return False
+    if YT_PLAYLIST_ID_REGEX.match(entry):
+        return True
+    if "/playlist?" in entry or YT_PLAYLIST_URL_REGEX.search(entry):
+        return True
+    return False
+
+
 def normalize_youtube_target(raw_entry: str) -> str:
-    """Convert raw 11-character YouTube ID or URL into a canonical YouTube watch URL."""
+    """Convert raw YouTube video/playlist ID or URL into a canonical YouTube URL."""
     entry = raw_entry.strip()
     if not entry:
         raise ValueError("Empty URL or video ID")
@@ -89,17 +103,89 @@ def normalize_youtube_target(raw_entry: str) -> str:
     if YT_ID_REGEX.match(entry):
         return f"https://www.youtube.com/watch?v={entry}"
 
+    if YT_PLAYLIST_ID_REGEX.match(entry):
+        return f"https://www.youtube.com/playlist?list={entry}"
+
     if entry.startswith(("http://", "https://")):
         return entry
 
     if entry.startswith(("www.youtube.com/", "youtube.com/", "youtu.be/")):
         return f"https://{entry}"
 
+    pl_match = YT_PLAYLIST_URL_REGEX.search(entry)
+    if pl_match:
+        return f"https://www.youtube.com/playlist?list={pl_match.group(1)}"
+
     match = YT_URL_ID_REGEX.search(entry)
     if match:
         return f"https://www.youtube.com/watch?v={match.group(1)}"
 
-    raise ValueError(f"Invalid YouTube URL or ID: {entry}")
+    raise ValueError(f"Invalid YouTube URL, video ID, or playlist ID: {entry}")
+
+
+def expand_playlist_urls(raw_entry: str) -> list[str]:
+    """Extract all individual video URLs from a YouTube playlist quickly using extract_flat."""
+    import yt_dlp
+
+    url = normalize_youtube_target(raw_entry)
+    # If URL has both v= and list=, convert to canonical playlist URL so yt-dlp expands the whole list
+    pl_match = YT_PLAYLIST_URL_REGEX.search(url)
+    if pl_match:
+        url = f"https://www.youtube.com/playlist?list={pl_match.group(1)}"
+
+    opts: dict[str, Any] = {
+        "extract_flat": "in_playlist",
+        "quiet": True,
+        "no_warnings": True,
+        "ignoreerrors": True,
+    }
+    print(f"\n==> Expanding playlist: {url}")
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+        if not info:
+            raise RuntimeError(f"Failed to fetch playlist info for {url}")
+
+    entries = info.get("entries") or []
+    video_urls: list[str] = []
+    for item in entries:
+        if not item:
+            continue
+        vid = item.get("id")
+        item_url = item.get("url")
+        if vid and YT_ID_REGEX.match(str(vid)):
+            video_urls.append(f"https://www.youtube.com/watch?v={vid}")
+        elif item_url:
+            video_urls.append(normalize_youtube_target(str(item_url)))
+
+    print(f"  [Playlist] Found {len(video_urls)} video(s) in '{info.get('title', 'Playlist')}'")
+    return video_urls
+
+
+def replace_playlist_in_queue(
+    urls_file: Path, playlist_entry: str, expanded_urls: list[str]
+) -> None:
+    """Atomically replace a playlist line in urls.txt with its individual video URLs."""
+    if not urls_file.exists():
+        return
+    lines = urls_file.read_text(encoding="utf-8").splitlines(keepends=True)
+    existing_set = {line.strip() for line in lines if line.strip() and not line.strip().startswith("#")}
+    new_lines: list[str] = []
+    replaced = False
+    target = playlist_entry.strip()
+
+    for line in lines:
+        if not replaced and line.strip() == target:
+            replaced = True
+            for v_url in expanded_urls:
+                if v_url not in existing_set:
+                    new_lines.append(f"{v_url}\n")
+                    existing_set.add(v_url)
+            continue
+        new_lines.append(line)
+
+    temp_file = urls_file.with_suffix(".tmp")
+    temp_file.write_text("".join(new_lines), encoding="utf-8")
+    temp_file.replace(urls_file)
 
 
 def read_settings(settings_file: Path = SETTINGS_FILE) -> dict[str, Any]:
@@ -1044,21 +1130,46 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.urls:
-        queue = [(entry, False) for entry in args.urls]
+        queue: list[tuple[str, bool]] = []
+        for entry in args.urls:
+            if is_playlist_target(entry):
+                try:
+                    expanded = expand_playlist_urls(entry)
+                    for v_url in expanded:
+                        queue.append((v_url, False))
+                except Exception as exc:
+                    print(f"  [Error] Failed expanding playlist '{entry}': {exc}", file=sys.stderr)
+            else:
+                queue.append((entry, False))
     else:
-        entries = read_queue(args.queue_file)
-        if not entries:
+        raw_entries = read_queue(args.queue_file)
+        if not raw_entries:
             render_root_dashboard(args.output_dir, args.queue_file)
             print(f"No URLs/IDs found in {args.queue_file}. Root index.html is up to date.")
             return 0
+
+        # First expand any playlist entries in urls.txt into individual video URLs
+        for entry in raw_entries:
+            if is_playlist_target(entry):
+                try:
+                    expanded = expand_playlist_urls(entry)
+                    replace_playlist_in_queue(args.queue_file, entry, expanded)
+                    print(
+                        f"  [Queue] Expanded playlist into {len(expanded)} video URL(s) in {args.queue_file.name}"
+                    )
+                except Exception as exc:
+                    print(f"  [Error] Failed expanding playlist '{entry}': {exc}", file=sys.stderr)
+
+        entries = read_queue(args.queue_file)
         queue = [(entry, True) for entry in entries]
 
     active_quality = args.quality or read_settings()["quality"]
     print(f"Processing {len(queue)} video(s) [Quality: {active_quality}]...")
     failures = 0
 
-    for entry, from_file in queue:
+    for idx, (entry, from_file) in enumerate(queue, start=1):
         try:
+            print(f"\n--- Video {idx} of {len(queue)} ---")
             out_folder = process_single_video(entry, args.output_dir, quality=active_quality)
             if from_file:
                 remove_from_queue(args.queue_file, entry)
