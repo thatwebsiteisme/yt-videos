@@ -486,12 +486,6 @@
             <span data-role="watch-text">⏱️ Watched: {{ v.watched_label }} / {{ v.duration }} ({{ v.watched_percent|int }}%)</span>
             <button class="toggle-watch-btn" onclick="toggleCardWatched('{{ v.video_id }}', {{ v.duration_seconds }})">✓ Toggle Watched</button>
           </div>
-          <div class="v-links">
-            <a class="pill-link primary" href="{{ v.viewer_rel }}">▶ Open Player</a>
-            <a class="pill-link" href="{{ v.details_md_rel }}" target="_blank">📄 Details</a>
-            <a class="pill-link" href="{{ v.clean_md_rel }}" target="_blank">📖 Clean Text</a>
-            <a class="pill-link" href="{{ v.ts_md_rel }}" target="_blank">⏱️ Timestamped</a>
-          </div>
         </div>
       </article>
       {% endfor %}
