@@ -1103,6 +1103,7 @@ def download_stage(
             print(
                 f"  [Cookies] Age-restricted video detected — auto-trying your browser cookies ({', '.join(candidates)})..."
             )
+            browser_errors: list[str] = []
             for b_name in candidates:
                 try:
                     retry_opts = dict(meta_opts)
@@ -1113,12 +1114,24 @@ def download_stage(
                         active_cookie_browser = b_name
                         print(f"  [Cookies] ✓ Authenticated using {b_name.title()} cookies!")
                         break
-                except Exception:
+                except Exception as b_exc:
+                    err_str = str(b_exc)
+                    if "Operation not permitted" in err_str:
+                        browser_errors.append(
+                            f"{b_name}: macOS blocked Terminal from reading {b_name.title()} cookies (Operation not permitted)"
+                        )
+                    elif "Sign in to confirm your age" in err_str:
+                        browser_errors.append(
+                            f"{b_name}: {b_name.title()} cookies read OK, but not signed into an 18+ YouTube account"
+                        )
+                    else:
+                        browser_errors.append(f"{b_name}: {err_str[:90]}")
                     continue
         if not info:
             if "Sign in to confirm your age" in str(exc):
+                details = " | ".join(browser_errors[:2]) if browser_errors else ""
                 raise RuntimeError(
-                    f"Age-restricted video ({url}). Make sure you are signed into YouTube in your browser (detected: {settings.get('detected_browser', 'firefox')}) or drop a cookies.txt file into the root folder."
+                    f"Age-restricted video ({url}). {details}. Fix: Either grant Terminal 'Full Disk Access' in macOS System Settings -> Privacy & Security, or paste cookies into the '🔑 Paste Cookies' button on the dashboard."
                 ) from exc
             raise
     if not info:

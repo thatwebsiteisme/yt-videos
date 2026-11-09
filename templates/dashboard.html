@@ -421,7 +421,17 @@
           </select>
           <button id="runBtn" class="btn" onclick="saveAndRun()">▶ Save & Download Now</button>
           <button id="saveBtn" class="btn btn-secondary" onclick="saveQueueOnly()">💾 Save</button>
+          <button class="btn btn-secondary" onclick="document.getElementById('cookiesModal').classList.toggle('hidden')">🔑 Paste Cookies</button>
           <span id="saveStatus" style="font-size: 0.82rem; color: var(--muted);"></span>
+        </div>
+        <div id="cookiesModal" class="hidden" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);">
+          <div style="font-size: 0.82rem; color: var(--muted); margin-bottom: 6px;">
+            If macOS blocks Terminal from reading your browser's cookie database directly, export YouTube cookies (Netscape format, e.g. via <em>cookies.txt</em> browser extension) and paste below:
+          </div>
+          <textarea id="cookiesTextInput" style="min-height: 80px;" placeholder="# Netscape HTTP Cookie File..."></textarea>
+          <div class="btn-row">
+            <button class="btn btn-secondary" onclick="saveCookiesTxt()">✓ Save to cookies.txt</button>
+          </div>
         </div>
       </div>
 
@@ -772,12 +782,23 @@
     async function saveAndRun() {
       const text = document.getElementById('urlsInput').value;
       const quality = document.getElementById('qualitySelect')?.value || '720p';
-      const cookies_browser = document.getElementById('cookiesSelect')?.value || 'none';
+      const cookies_browser = document.getElementById('cookiesSelect')?.value || 'auto';
       await fetch('/api/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ queue_text: text, quality, cookies_browser })
       });
+      checkServerStatus();
+    }
+
+    async function saveCookiesTxt() {
+      const text = document.getElementById('cookiesTextInput').value;
+      await fetch('/api/cookies', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cookies_text: text })
+      });
+      document.getElementById('cookiesModal').classList.add('hidden');
       checkServerStatus();
     }
 

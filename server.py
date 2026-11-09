@@ -17,6 +17,7 @@ from typing import Any
 from process import (
     APP_VERSION,
     BASE_DIR,
+    COOKIES_FILE,
     DEFAULT_DOWNLOADS_DIR,
     DEFAULT_URLS_FILE,
     parse_duration_seconds,
@@ -300,13 +301,30 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:
         clean_path = self.path.split("?", 1)[0]
-        if clean_path not in ("/api/queue", "/api/run", "/api/watch", "/api/update"):
+        if clean_path not in (
+            "/api/queue",
+            "/api/run",
+            "/api/watch",
+            "/api/update",
+            "/api/cookies",
+        ):
             self._send_json({"error": "Not found"}, status=HTTPStatus.NOT_FOUND)
             return
 
         length = int(self.headers.get("Content-Length", "0"))
         raw = self.rfile.read(length) if length > 0 else b"{}"
         data = json.loads(raw.decode("utf-8"))
+
+        if clean_path == "/api/cookies":
+            cookies_text = str(data.get("cookies_text") or "").strip()
+            if cookies_text:
+                COOKIES_FILE.write_text(cookies_text + "\n", encoding="utf-8")
+                save_settings(cookies_browser="cookies.txt")
+                STATE.append_log("✓ Saved cookies.txt! Age-restricted videos will now use cookies.txt.")
+            else:
+                COOKIES_FILE.unlink(missing_ok=True)
+            self._send_json({"ok": True, "has_cookies": COOKIES_FILE.exists()})
+            return
 
         if clean_path == "/api/watch":
             ok = update_video_watch_metadata(
