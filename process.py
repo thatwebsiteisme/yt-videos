@@ -24,6 +24,7 @@ TEMPLATES_DIR = BASE_DIR / "templates"
 DEFAULT_URLS_FILE = BASE_DIR / "urls.txt"
 DEFAULT_DOWNLOADS_DIR = BASE_DIR / "downloads"
 SETTINGS_FILE = BASE_DIR / "settings.json"
+APP_VERSION = "1.2.0"
 DEFAULT_QUALITY = "720p"
 WHISPER_MODEL_REPO = "mlx-community/whisper-turbo"
 BLOCK_INTERVAL_SECONDS = 30.0
@@ -885,6 +886,7 @@ def render_root_dashboard(
     settings = read_settings(settings_file)
 
     html = template.render(
+        app_version=APP_VERSION,
         videos=videos,
         queue_text=queue_text,
         selected_quality=settings["quality"],

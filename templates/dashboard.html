@@ -383,6 +383,7 @@
   <header>
     <h1>
       <span>🎬 Local YouTube Library</span>
+      <span id="versionBadge" class="status-badge">v{{ app_version|default('1.2.0') }}</span>
       <span id="modeBadge" class="status-badge">Static Library Mode (file://)</span>
       <button id="updateBadge" class="status-badge update-btn hidden" onclick="pullGitHubUpdate()">⬇ Update Available (Click to Update)</button>
     </h1>
@@ -675,6 +676,11 @@
         const badge = document.getElementById('modeBadge');
         badge.textContent = '● Live App Mode';
         badge.classList.add('online');
+
+        if (data.version) {
+          const vBadge = document.getElementById('versionBadge');
+          if (vBadge) vBadge.textContent = `v${data.version}`;
+        }
 
         if (data.update_info) {
           const gitText = document.getElementById('gitStatusText');

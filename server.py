@@ -15,10 +15,11 @@ from pathlib import Path
 from typing import Any
 
 from process import (
+    APP_VERSION,
     BASE_DIR,
     DEFAULT_DOWNLOADS_DIR,
     DEFAULT_URLS_FILE,
-     parse_duration_seconds,
+    parse_duration_seconds,
     read_settings,
     render_root_dashboard,
     save_settings,
@@ -56,6 +57,7 @@ class PipelineJobState:
                 else ""
             )
             return {
+                "version": APP_VERSION,
                 "running": self.running,
                 "logs": "\n".join(self.logs),
                 "queue_text": queue_text,

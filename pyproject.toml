@@ -1,6 +1,6 @@
 [project]
 name = "yt-videos-pipeline"
-version = "1.0.0"
+version = "1.2.0"
 description = "Local YouTube video downloader, audio extractor, subtitle parser, and MLX Whisper fallback transcriber"
 requires-python = ">=3.11"
 dependencies = [
