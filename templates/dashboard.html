@@ -689,8 +689,16 @@
         }
 
         const urlsInput = document.getElementById('urlsInput');
-        if (document.activeElement !== urlsInput && !data.running) {
+        if (document.activeElement !== urlsInput) {
           urlsInput.value = data.queue_text;
+        }
+        const activeLines = (data.queue_text || '')
+          .split('\n')
+          .map(l => l.trim())
+          .filter(l => l && !l.startsWith('#'));
+        const qCount = document.getElementById('queueCount');
+        if (qCount) {
+          qCount.textContent = `${activeLines.length} remaining in queue`;
         }
         const qualitySelect = document.getElementById('qualitySelect');
         if (qualitySelect && document.activeElement !== qualitySelect && data.quality) {

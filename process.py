@@ -1328,6 +1328,18 @@ def main(argv: list[str] | None = None) -> int:
 
     # Producer-Consumer Pipeline:
     # Main thread downloads Video N+1 while worker pool extracts audio, screenshots & transcripts for Video N
+    def _on_postprocess_done(fut: Future[Path], entry_str: str, is_from_file: bool) -> None:
+        try:
+            out_folder = fut.result()
+            if is_from_file:
+                remove_from_queue(args.queue_file, entry_str)
+                print(f"  [Queue] Removed '{entry_str}' from {args.queue_file.name}")
+            with QUEUE_LOCK:
+                render_root_dashboard(args.output_dir, args.queue_file)
+            print(f"  [Done] Output folder: {out_folder}")
+        except Exception as exc:
+            print(f"  [Error] Failed post-processing '{entry_str}': {exc}", file=sys.stderr)
+
     with ThreadPoolExecutor(max_workers=max(1, args.workers)) as post_pool:
         for idx, (entry, from_file) in enumerate(queue, start=1):
             try:
@@ -1337,24 +1349,18 @@ def main(argv: list[str] | None = None) -> int:
                     f"  [Pipeline] Handing '{bundle['slug'][:28]}' to background post-processor (starting next download immediately)..."
                 )
                 fut = post_pool.submit(postprocess_stage, bundle)
+                fut.add_done_callback(
+                    lambda f, e=entry, ff=from_file: _on_postprocess_done(f, e, ff)
+                )
                 post_futures.append((fut, entry, from_file))
             except Exception as exc:
                 failures += 1
                 print(f"  [Error] Failed downloading '{entry}': {exc}", file=sys.stderr)
 
-        # Wait for all background post-processing tasks to finish
-        for fut, entry, from_file in post_futures:
-            try:
-                out_folder = fut.result()
-                if from_file:
-                    remove_from_queue(args.queue_file, entry)
-                    print(f"  [Queue] Removed '{entry}' from {args.queue_file.name}")
-                with QUEUE_LOCK:
-                    render_root_dashboard(args.output_dir, args.queue_file)
-                print(f"  [Done] Output folder: {out_folder}")
-            except Exception as exc:
+        # Wait for any remaining background post-processing tasks to finish
+        for fut, _, _ in post_futures:
+            if fut.exception() is not None:
                 failures += 1
-                print(f"  [Error] Failed post-processing '{entry}': {exc}", file=sys.stderr)
 
     render_root_dashboard(args.output_dir, args.queue_file)
     return 1 if failures else 0
