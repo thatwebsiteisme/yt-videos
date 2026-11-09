@@ -19,12 +19,47 @@ BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 DEFAULT_URLS_FILE = BASE_DIR / "urls.txt"
 DEFAULT_DOWNLOADS_DIR = BASE_DIR / "downloads"
+SETTINGS_FILE = BASE_DIR / "settings.json"
+DEFAULT_QUALITY = "720p"
 WHISPER_MODEL_REPO = "mlx-community/whisper-turbo"
 BLOCK_INTERVAL_SECONDS = 30.0
 SCENE_THRESHOLD = 0.28
 MIN_SCREENSHOT_GAP_SECONDS = 25.0
 FALLBACK_SCREENSHOT_INTERVAL = 60.0
 MAX_SCREENSHOTS = 40
+
+QUALITY_PRESETS: dict[str, dict[str, str]] = {
+    "720p": {
+        "label": "720p MP4 (Default — Fast & Compact)",
+        "format": "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]/best",
+        "audio_only": "false",
+    },
+    "1080p": {
+        "label": "1080p Full HD MP4",
+        "format": "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best[height<=1080]/best",
+        "audio_only": "false",
+    },
+    "480p": {
+        "label": "480p SD MP4 (Small File)",
+        "format": "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best[height<=480]/best",
+        "audio_only": "false",
+    },
+    "360p": {
+        "label": "360p Low Data MP4",
+        "format": "bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360][ext=mp4]/best[height<=360]/best",
+        "audio_only": "false",
+    },
+    "best": {
+        "label": "Best Available (4K / Max MP4)",
+        "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        "audio_only": "false",
+    },
+    "audio": {
+        "label": "Audio Only (.m4a + Transcripts, No Video)",
+        "format": "bestaudio[ext=m4a]/bestaudio/best",
+        "audio_only": "true",
+    },
+}
 
 YT_ID_REGEX = re.compile(r"^[A-Za-z0-9_-]{11}$")
 YT_URL_ID_REGEX = re.compile(
@@ -65,6 +100,29 @@ def normalize_youtube_target(raw_entry: str) -> str:
         return f"https://www.youtube.com/watch?v={match.group(1)}"
 
     raise ValueError(f"Invalid YouTube URL or ID: {entry}")
+
+
+def read_settings(settings_file: Path = SETTINGS_FILE) -> dict[str, Any]:
+    """Read persistent settings from settings.json, defaulting quality to 720p."""
+    defaults: dict[str, Any] = {"quality": DEFAULT_QUALITY}
+    if not settings_file.exists():
+        return defaults
+    try:
+        data = json.loads(settings_file.read_text(encoding="utf-8"))
+        q = str(data.get("quality") or DEFAULT_QUALITY)
+        if q not in QUALITY_PRESETS:
+            q = DEFAULT_QUALITY
+        return {"quality": q}
+    except Exception:
+        return defaults
+
+
+def save_settings(quality: str, settings_file: Path = SETTINGS_FILE) -> dict[str, Any]:
+    """Save chosen download quality preset to settings.json."""
+    q = quality if quality in QUALITY_PRESETS else DEFAULT_QUALITY
+    payload = {"quality": q}
+    settings_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return payload
 
 
 def read_queue(urls_file: Path) -> list[str]:
@@ -691,6 +749,7 @@ def render_root_dashboard(
     urls_file: Path = DEFAULT_URLS_FILE,
     output_html: Path = BASE_DIR / "index.html",
     templates_dir: Path = TEMPLATES_DIR,
+    settings_file: Path = SETTINGS_FILE,
 ) -> Path:
     """Render root index.html library hub from templates/dashboard.html."""
     env = Environment(
@@ -700,10 +759,13 @@ def render_root_dashboard(
     template = env.get_template("dashboard.html")
     videos = collect_downloaded_videos(downloads_dir)
     queue_text = urls_file.read_text(encoding="utf-8") if urls_file.exists() else ""
+    settings = read_settings(settings_file)
 
     html = template.render(
         videos=videos,
         queue_text=queue_text,
+        selected_quality=settings["quality"],
+        quality_presets=QUALITY_PRESETS,
     )
     output_html.write_text(html, encoding="utf-8")
     return output_html
@@ -741,11 +803,19 @@ def extract_audio_from_video(video_path: Path, audio_path: Path) -> None:
     subprocess.run(cmd_encode, capture_output=True, text=True, check=True)
 
 
-def process_single_video(raw_entry: str, downloads_dir: Path) -> Path:
+def process_single_video(
+    raw_entry: str,
+    downloads_dir: Path,
+    quality: str | None = None,
+) -> Path:
     """Download video, extract audio, capture scene screenshots, and generate Markdown + HTML viewer."""
     import yt_dlp
 
     ensure_ffmpeg_in_path()
+    chosen_quality = quality if (quality and quality in QUALITY_PRESETS) else read_settings()["quality"]
+    preset = QUALITY_PRESETS[chosen_quality]
+    audio_only = preset.get("audio_only") == "true"
+
     url = normalize_youtube_target(raw_entry)
     downloads_dir.mkdir(parents=True, exist_ok=True)
 
@@ -754,7 +824,7 @@ def process_single_video(raw_entry: str, downloads_dir: Path) -> Path:
         "no_warnings": True,
         "noplaylist": True,
     }
-    print(f"\n==> Fetching metadata for: {url}")
+    print(f"\n==> Fetching metadata for: {url} [Format: {chosen_quality}]")
     with yt_dlp.YoutubeDL(meta_opts) as ydl:
         info = ydl.extract_info(url, download=False)
         if not info:
@@ -774,7 +844,6 @@ def process_single_video(raw_entry: str, downloads_dir: Path) -> Path:
     legacy_video_path = video_dir / "video.mp4"
     legacy_audio_path = video_dir / "audio.m4a"
 
-    # Migrate legacy video.mp4 / audio.m4a if re-running on an older folder
     if legacy_video_path.exists() and not video_path.exists():
         legacy_video_path.replace(video_path)
     if legacy_audio_path.exists() and not audio_path.exists():
@@ -789,8 +858,7 @@ def process_single_video(raw_entry: str, downloads_dir: Path) -> Path:
     html_path = video_dir / "index.html"
 
     dl_opts: dict[str, Any] = {
-        "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-        "merge_output_format": "mp4",
+        "format": preset["format"],
         "outtmpl": str(video_dir / f"{slug}.%(ext)s"),
         "writesubtitles": True,
         "writeautomaticsub": True,
@@ -801,27 +869,43 @@ def process_single_video(raw_entry: str, downloads_dir: Path) -> Path:
         "quiet": False,
         "no_warnings": True,
     }
+    if not audio_only:
+        dl_opts["merge_output_format"] = "mp4"
 
-    print(f"  [Download] Saving video & checking captions -> {video_dir.name}/")
+    print(f"  [Download] Saving ({chosen_quality}) & checking captions -> {video_dir.name}/")
     with yt_dlp.YoutubeDL(dl_opts) as ydl:
         info = ydl.extract_info(url, download=True) or info
 
-    if not video_path.exists():
-        candidates = [
-            p
-            for p in video_dir.glob(f"{slug}.*")
-            if p.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov"}
-        ]
-        if not candidates:
-            raise FileNotFoundError(f"Downloaded video file not found in {video_dir}")
-        video_path = candidates[0]
+    if audio_only:
+        if not audio_path.exists():
+            candidates = [
+                p
+                for p in video_dir.glob(f"{slug}.*")
+                if p.suffix.lower() in {".m4a", ".mp3", ".webm", ".opus", ".aac"}
+            ]
+            if not candidates:
+                raise FileNotFoundError(f"Downloaded audio file not found in {video_dir}")
+            if candidates[0] != audio_path:
+                extract_audio_from_video(candidates[0], audio_path)
+                candidates[0].unlink(missing_ok=True)
+        screenshots: list[dict[str, Any]] = []
+    else:
+        if not video_path.exists():
+            candidates = [
+                p
+                for p in video_dir.glob(f"{slug}.*")
+                if p.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov"}
+            ]
+            if not candidates:
+                raise FileNotFoundError(f"Downloaded video file not found in {video_dir}")
+            video_path = candidates[0]
 
-    print(f"  [Audio] Extracting audio track -> {audio_path.name}")
-    extract_audio_from_video(video_path, audio_path)
+        print(f"  [Audio] Extracting audio track -> {audio_path.name}")
+        extract_audio_from_video(video_path, audio_path)
 
-    print("  [Screenshots] Detecting visual scene changes & chapters -> screenshots/")
-    screenshots = extract_context_screenshots(video_path, screenshots_dir, info)
-    print(f"  [Screenshots] Captured {len(screenshots)} screenshot(s)")
+        print("  [Screenshots] Detecting visual scene changes & chapters -> screenshots/")
+        screenshots = extract_context_screenshots(video_path, screenshots_dir, info)
+        print(f"  [Screenshots] Captured {len(screenshots)} screenshot(s)")
 
     sub_files = sorted(video_dir.glob("*.json3"))
     segments: list[dict[str, Any]] = []
@@ -939,11 +1023,20 @@ def main(argv: list[str] | None = None) -> int:
         help="Directory where per-video folders are created (default: downloads/)",
     )
     parser.add_argument(
+        "--quality",
+        choices=list(QUALITY_PRESETS.keys()),
+        default=None,
+        help="Download quality/type preset (default: 720p or value in settings.json)",
+    )
+    parser.add_argument(
         "--rebuild-dashboard-only",
         action="store_true",
         help="Only regenerate the root index.html library dashboard and exit",
     )
     args = parser.parse_args(argv)
+
+    if args.quality:
+        save_settings(args.quality)
 
     if args.rebuild_dashboard_only:
         dash = render_root_dashboard(args.output_dir, args.queue_file)
@@ -960,12 +1053,13 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         queue = [(entry, True) for entry in entries]
 
-    print(f"Processing {len(queue)} video(s)...")
+    active_quality = args.quality or read_settings()["quality"]
+    print(f"Processing {len(queue)} video(s) [Quality: {active_quality}]...")
     failures = 0
 
     for entry, from_file in queue:
         try:
-            out_folder = process_single_video(entry, args.output_dir)
+            out_folder = process_single_video(entry, args.output_dir, quality=active_quality)
             if from_file:
                 remove_from_queue(args.queue_file, entry)
                 print(f"  [Queue] Removed '{entry}' from {args.queue_file.name}")

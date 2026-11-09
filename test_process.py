@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 
 from process import (
+    DEFAULT_QUALITY,
+    QUALITY_PRESETS,
     build_markdown,
     build_markdown_files,
     build_structured_transcript,
@@ -19,9 +21,11 @@ from process import (
     parse_duration_seconds,
     parse_json3_subtitles,
     read_queue,
+    read_settings,
     remove_from_queue,
     render_html_viewer,
     render_root_dashboard,
+    save_settings,
     slugify,
 )
 from server import update_video_watch_metadata
@@ -222,6 +226,22 @@ def test_render_root_dashboard(tmp_path: Path) -> None:
     assert updated["watched_percent"] == 50.0
     assert updated["watch_status"] == "in_progress"
     assert parse_duration_seconds("00:05:00") == 300.0
+
+
+def test_quality_settings_default_720p(tmp_path: Path) -> None:
+    sfile = tmp_path / "settings.json"
+    assert read_settings(sfile) == {"quality": "720p"}
+    assert DEFAULT_QUALITY == "720p"
+    assert "720p" in QUALITY_PRESETS
+    assert "1080p" in QUALITY_PRESETS
+    assert "480p" in QUALITY_PRESETS
+    assert "audio" in QUALITY_PRESETS
+
+    save_settings("1080p", sfile)
+    assert read_settings(sfile) == {"quality": "1080p"}
+    save_settings("invalid_preset", sfile)
+    assert read_settings(sfile) == {"quality": "720p"}
+
 
 
 

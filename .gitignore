@@ -9,4 +9,5 @@ __pycache__/
 downloads/
 index.html
 urls.txt
+settings.json
 *.zip

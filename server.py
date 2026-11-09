@@ -18,8 +18,10 @@ from process import (
     BASE_DIR,
     DEFAULT_DOWNLOADS_DIR,
     DEFAULT_URLS_FILE,
-    parse_duration_seconds,
+     parse_duration_seconds,
+    read_settings,
     render_root_dashboard,
+    save_settings,
 )
 
 HOST = "127.0.0.1"
@@ -58,6 +60,7 @@ class PipelineJobState:
                 "logs": "\n".join(self.logs),
                 "queue_text": queue_text,
                 "update_info": self.update_info,
+                "quality": read_settings()["quality"],
             }
 
 
@@ -281,6 +284,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             render_root_dashboard(DEFAULT_DOWNLOADS_DIR, DEFAULT_URLS_FILE)
             self._send_json({"ok": True, "update_info": info})
             return
+
+        if "quality" in data and data["quality"]:
+            save_settings(str(data["quality"]))
 
         if "queue_text" in data:
             DEFAULT_URLS_FILE.write_text(str(data["queue_text"]), encoding="utf-8")
