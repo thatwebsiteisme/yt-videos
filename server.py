@@ -157,7 +157,9 @@ def update_video_watch_metadata(
             except Exception:
                 meta = {}
         folder_vid = meta.get("video_id") or (
-            folder.name.split("_")[-1] if "_" in folder.name else ""
+            folder.name[-11:]
+            if len(folder.name) >= 12 and folder.name[-12] == "_"
+            else (folder.name.split("_")[-1] if "_" in folder.name else "")
         )
         if folder_vid != video_id:
             continue

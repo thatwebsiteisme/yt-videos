@@ -630,6 +630,7 @@ def build_markdown_files(
 
     main_md = (
         f"# {title}\n\n"
+        f"![{title}](cover.jpg)\n\n"
         f"- **URL:** {webpage_url}\n"
         f"- **Video ID:** `{video_id}`\n"
         f"- **Channel:** {channel}\n"
@@ -637,6 +638,7 @@ def build_markdown_files(
         f"- **Duration:** {duration_str}\n"
         f"- **Video File:** `{video_filename}`\n"
         f"- **Audio File:** `{audio_filename}`\n"
+        f"- **Cover Image:** `cover.jpg`\n"
         f"- **HTML Player:** [{html_filename}]({html_filename})\n"
         f"- **Screenshots:** `{screenshots_count}` in `screenshots/`\n"
         f"- **Transcript Source:** {transcript_source}\n\n"
@@ -757,12 +759,16 @@ def collect_downloaded_videos(downloads_dir: Path = DEFAULT_DOWNLOADS_DIR) -> li
             if (folder / "screenshots").exists()
             else []
         )
-        chosen_shot = shots[1] if len(shots) > 1 else (shots[0] if shots else None)
-        thumb_rel = (
-            f"downloads/{folder.name}/screenshots/{chosen_shot.name}"
-            if chosen_shot
-            else ""
-        )
+        cover_file = folder / "cover.jpg"
+        if cover_file.exists():
+            thumb_rel = f"downloads/{folder.name}/cover.jpg"
+        else:
+            chosen_shot = shots[1] if len(shots) > 1 else (shots[0] if shots else None)
+            thumb_rel = (
+                f"downloads/{folder.name}/screenshots/{chosen_shot.name}"
+                if chosen_shot
+                else ""
+            )
 
         # Find actual video and audio filenames inside the folder
         video_candidates = [
@@ -819,7 +825,7 @@ def collect_downloaded_videos(downloads_dir: Path = DEFAULT_DOWNLOADS_DIR) -> li
         channel = "YouTube"
         upload_date = folder.name[:10] if len(folder.name) >= 10 else ""
         duration_str = "00:00:00"
-        video_id = folder.name.split("_")[-1] if "_" in folder.name else ""
+        video_id = folder.name[-11:] if len(folder.name) >= 12 and folder.name[-12] == "_" else (folder.name.split("_")[-1] if "_" in folder.name else "")
         if md_files:
             md_text = md_files[0].read_text(encoding="utf-8", errors="ignore")
             for line in md_text.splitlines():
@@ -920,12 +926,48 @@ def extract_audio_from_video(video_path: Path, audio_path: Path) -> None:
     subprocess.run(cmd_encode, capture_output=True, text=True, check=True)
 
 
+def finalize_cover_image(video_dir: Path, slug: str) -> Path | None:
+    """Convert yt-dlp downloaded thumbnail (.webp/.jpg/.png) into a clean cover.jpg in video_dir."""
+    ensure_ffmpeg_in_path()
+    cover_path = video_dir / "cover.jpg"
+    thumb_candidates = [
+        p
+        for p in video_dir.glob(f"{slug}.*")
+        if p.suffix.lower() in {".webp", ".jpg", ".jpeg", ".png"}
+    ]
+    if not thumb_candidates:
+        return cover_path if cover_path.exists() else None
+
+    src_thumb = thumb_candidates[0]
+    if src_thumb.suffix.lower() in {".jpg", ".jpeg"}:
+        src_thumb.replace(cover_path)
+    else:
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(src_thumb),
+            "-q:v",
+            "2",
+            str(cover_path),
+        ]
+        subprocess.run(cmd, capture_output=True, text=True, check=False)
+        src_thumb.unlink(missing_ok=True)
+
+    # Clean up any extra thumbnail files
+    for extra in thumb_candidates[1:]:
+        if extra != cover_path:
+            extra.unlink(missing_ok=True)
+
+    return cover_path if cover_path.exists() else None
+
+
 def download_stage(
     raw_entry: str,
     downloads_dir: Path,
     quality: str | None = None,
 ) -> dict[str, Any]:
-    """Stage 1 (Network I/O): Fetch metadata, video/audio stream, and YouTube subtitles."""
+    """Stage 1 (Network I/O): Fetch metadata, video/audio stream, cover thumbnail, and YouTube subtitles."""
     import yt_dlp
 
     ensure_ffmpeg_in_path()
@@ -970,6 +1012,7 @@ def download_stage(
     dl_opts: dict[str, Any] = {
         "format": preset["format"],
         "outtmpl": str(video_dir / f"{slug}.%(ext)s"),
+        "writethumbnail": True,
         "writesubtitles": True,
         "writeautomaticsub": True,
         "subtitleslangs": ["en"],
@@ -983,9 +1026,11 @@ def download_stage(
     if not audio_only:
         dl_opts["merge_output_format"] = "mp4"
 
-    print(f"  [Download] Saving ({chosen_quality}) & captions -> {video_dir.name}/")
+    print(f"  [Download] Saving ({chosen_quality}), cover & captions -> {video_dir.name}/")
     with yt_dlp.YoutubeDL(dl_opts) as ydl:
         info = ydl.extract_info(url, download=True) or info
+
+    finalize_cover_image(video_dir, slug)
 
     if not audio_only and not video_path.exists():
         candidates = [
