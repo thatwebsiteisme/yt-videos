@@ -4,16 +4,20 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import Future, ThreadPoolExecutor
 import json
 import re
 import shutil
 import subprocess
 import sys
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+QUEUE_LOCK = threading.Lock()
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
@@ -224,23 +228,24 @@ def read_queue(urls_file: Path) -> list[str]:
 
 
 def remove_from_queue(urls_file: Path, completed_entry: str) -> None:
-    """Atomically remove the first matching entry from urls.txt, preserving comments."""
-    if not urls_file.exists():
-        return
-    lines = urls_file.read_text(encoding="utf-8").splitlines(keepends=True)
-    new_lines: list[str] = []
-    removed = False
-    target = completed_entry.strip()
+    """Atomically remove the first matching entry from urls.txt, preserving comments (thread-safe)."""
+    with QUEUE_LOCK:
+        if not urls_file.exists():
+            return
+        lines = urls_file.read_text(encoding="utf-8").splitlines(keepends=True)
+        new_lines: list[str] = []
+        removed = False
+        target = completed_entry.strip()
 
-    for line in lines:
-        if not removed and line.strip() == target:
-            removed = True
-            continue
-        new_lines.append(line)
+        for line in lines:
+            if not removed and line.strip() == target:
+                removed = True
+                continue
+            new_lines.append(line)
 
-    temp_file = urls_file.with_suffix(".tmp")
-    temp_file.write_text("".join(new_lines), encoding="utf-8")
-    temp_file.replace(urls_file)
+        temp_file = urls_file.with_suffix(".tmp")
+        temp_file.write_text("".join(new_lines), encoding="utf-8")
+        temp_file.replace(urls_file)
 
 
 def slugify(value: str, max_length: int = 70) -> str:
@@ -889,16 +894,18 @@ def extract_audio_from_video(video_path: Path, audio_path: Path) -> None:
     subprocess.run(cmd_encode, capture_output=True, text=True, check=True)
 
 
-def process_single_video(
+def download_stage(
     raw_entry: str,
     downloads_dir: Path,
     quality: str | None = None,
-) -> Path:
-    """Download video, extract audio, capture scene screenshots, and generate Markdown + HTML viewer."""
+) -> dict[str, Any]:
+    """Stage 1 (Network I/O): Fetch metadata, video/audio stream, and YouTube subtitles."""
     import yt_dlp
 
     ensure_ffmpeg_in_path()
-    chosen_quality = quality if (quality and quality in QUALITY_PRESETS) else read_settings()["quality"]
+    chosen_quality = (
+        quality if (quality and quality in QUALITY_PRESETS) else read_settings()["quality"]
+    )
     preset = QUALITY_PRESETS[chosen_quality]
     audio_only = preset.get("audio_only") == "true"
 
@@ -910,7 +917,7 @@ def process_single_video(
         "no_warnings": True,
         "noplaylist": True,
     }
-    print(f"\n==> Fetching metadata for: {url} [Format: {chosen_quality}]")
+    print(f"\n==> [Download Stage] Fetching metadata for: {url} [Format: {chosen_quality}]")
     with yt_dlp.YoutubeDL(meta_opts) as ydl:
         info = ydl.extract_info(url, download=False)
         if not info:
@@ -924,7 +931,6 @@ def process_single_video(
     video_dir = downloads_dir / folder_name
     video_dir.mkdir(parents=True, exist_ok=True)
 
-    # Name video and audio after the video title slug so external apps identify them cleanly
     video_path = video_dir / f"{slug}.mp4"
     audio_path = video_dir / f"{slug}.m4a"
     legacy_video_path = video_dir / "video.mp4"
@@ -934,14 +940,6 @@ def process_single_video(
         legacy_video_path.replace(video_path)
     if legacy_audio_path.exists() and not audio_path.exists():
         legacy_audio_path.replace(audio_path)
-
-    screenshots_dir = video_dir / "screenshots"
-    transcripts_dir = video_dir / "transcripts"
-    transcripts_dir.mkdir(parents=True, exist_ok=True)
-    md_path = video_dir / f"{slug}.md"
-    clean_md_path = transcripts_dir / "transcript-clean.md"
-    ts_md_path = transcripts_dir / "transcript-timestamped.md"
-    html_path = video_dir / "index.html"
 
     dl_opts: dict[str, Any] = {
         "format": preset["format"],
@@ -954,13 +952,58 @@ def process_single_video(
         "noplaylist": True,
         "quiet": False,
         "no_warnings": True,
+        "concurrent_fragment_downloads": 4,
     }
     if not audio_only:
         dl_opts["merge_output_format"] = "mp4"
 
-    print(f"  [Download] Saving ({chosen_quality}) & checking captions -> {video_dir.name}/")
+    print(f"  [Download] Saving ({chosen_quality}) & captions -> {video_dir.name}/")
     with yt_dlp.YoutubeDL(dl_opts) as ydl:
         info = ydl.extract_info(url, download=True) or info
+
+    if not audio_only and not video_path.exists():
+        candidates = [
+            p
+            for p in video_dir.glob(f"{slug}.*")
+            if p.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov"}
+        ]
+        if not candidates:
+            raise FileNotFoundError(f"Downloaded video file not found in {video_dir}")
+        video_path = candidates[0]
+
+    return {
+        "raw_entry": raw_entry,
+        "info": info,
+        "video_id": video_id,
+        "title": title,
+        "upload_date": upload_date,
+        "slug": slug,
+        "video_dir": video_dir,
+        "video_path": video_path,
+        "audio_path": audio_path,
+        "audio_only": audio_only,
+    }
+
+
+def postprocess_stage(bundle: dict[str, Any]) -> Path:
+    """Stage 2 (Local CPU/GPU): Run audio extraction + scene screenshots in parallel, then build MD & HTML."""
+    info = bundle["info"]
+    video_id = bundle["video_id"]
+    title = bundle["title"]
+    upload_date = bundle["upload_date"]
+    slug = bundle["slug"]
+    video_dir: Path = bundle["video_dir"]
+    video_path: Path = bundle["video_path"]
+    audio_path: Path = bundle["audio_path"]
+    audio_only: bool = bundle["audio_only"]
+
+    screenshots_dir = video_dir / "screenshots"
+    transcripts_dir = video_dir / "transcripts"
+    transcripts_dir.mkdir(parents=True, exist_ok=True)
+    md_path = video_dir / f"{slug}.md"
+    clean_md_path = transcripts_dir / "transcript-clean.md"
+    ts_md_path = transcripts_dir / "transcript-timestamped.md"
+    html_path = video_dir / "index.html"
 
     if audio_only:
         if not audio_path.exists():
@@ -976,22 +1019,18 @@ def process_single_video(
                 candidates[0].unlink(missing_ok=True)
         screenshots: list[dict[str, Any]] = []
     else:
-        if not video_path.exists():
-            candidates = [
-                p
-                for p in video_dir.glob(f"{slug}.*")
-                if p.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov"}
-            ]
-            if not candidates:
-                raise FileNotFoundError(f"Downloaded video file not found in {video_dir}")
-            video_path = candidates[0]
-
-        print(f"  [Audio] Extracting audio track -> {audio_path.name}")
-        extract_audio_from_video(video_path, audio_path)
-
-        print("  [Screenshots] Detecting visual scene changes & chapters -> screenshots/")
-        screenshots = extract_context_screenshots(video_path, screenshots_dir, info)
-        print(f"  [Screenshots] Captured {len(screenshots)} screenshot(s)")
+        # Run Audio Extraction and Scene Screenshot Detection in parallel!
+        print(f"  [Post-Process:{slug[:28]}] Running Audio + Scene Screenshots in parallel...")
+        with ThreadPoolExecutor(max_workers=2) as sub_pool:
+            audio_fut = sub_pool.submit(extract_audio_from_video, video_path, audio_path)
+            shots_fut = sub_pool.submit(
+                extract_context_screenshots, video_path, screenshots_dir, info
+            )
+            audio_fut.result()
+            screenshots = shots_fut.result()
+        print(
+            f"  [Post-Process:{slug[:28]}] Audio ready & {len(screenshots)} screenshot(s) captured"
+        )
 
     sub_files = sorted(video_dir.glob("*.json3"))
     segments: list[dict[str, Any]] = []
@@ -1003,7 +1042,9 @@ def process_single_video(
             if sf.name.endswith(".en.json3"):
                 chosen_sub = sf
                 break
-        print(f"  [Subtitles] Found YouTube captions ({chosen_sub.name}) - parsing locally (0 AI compute)")
+        print(
+            f"  [Subtitles:{slug[:28]}] Parsing YouTube captions ({chosen_sub.name}) locally"
+        )
         segments = parse_json3_subtitles(chosen_sub)
         transcript_source = "YouTube Subtitles (`en`)"
         for sf in sub_files:
@@ -1036,9 +1077,6 @@ def process_single_video(
     md_path.write_text(main_md, encoding="utf-8")
     clean_md_path.write_text(clean_md, encoding="utf-8")
     ts_md_path.write_text(ts_md, encoding="utf-8")
-    print(
-        f"  [Markdown] Created {md_path.name} + transcripts/{clean_md_path.name} & transcripts/{ts_md_path.name}"
-    )
 
     html_content = render_html_viewer(
         info=info,
@@ -1051,9 +1089,7 @@ def process_single_video(
         markdown_filename=md_path.name,
     )
     html_path.write_text(html_content, encoding="utf-8")
-    print(f"  [HTML] Created {html_path.name} (double-click in Finder to view)")
 
-    # Preserve existing watch progress if re-running on an existing folder
     meta_path = video_dir / "metadata.json"
     existing_meta: dict[str, Any] = {}
     if meta_path.exists():
@@ -1083,8 +1119,18 @@ def process_single_video(
     meta_path.write_text(
         json.dumps(meta_summary, indent=2), encoding="utf-8"
     )
-
+    print(f"  [Complete:{slug[:28]}] Created {md_path.name}, transcripts/, & {html_path.name}")
     return video_dir
+
+
+def process_single_video(
+    raw_entry: str,
+    downloads_dir: Path,
+    quality: str | None = None,
+) -> Path:
+    """Download video, extract audio, capture scene screenshots, and generate Markdown + HTML viewer."""
+    bundle = download_stage(raw_entry, downloads_dir, quality=quality)
+    return postprocess_stage(bundle)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1113,6 +1159,12 @@ def main(argv: list[str] | None = None) -> int:
         choices=list(QUALITY_PRESETS.keys()),
         default=None,
         help="Download quality/type preset (default: 720p or value in settings.json)",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=2,
+        help="Number of parallel background post-processing workers (default: 2)",
     )
     parser.add_argument(
         "--rebuild-dashboard-only",
@@ -1148,7 +1200,6 @@ def main(argv: list[str] | None = None) -> int:
             print(f"No URLs/IDs found in {args.queue_file}. Root index.html is up to date.")
             return 0
 
-        # First expand any playlist entries in urls.txt into individual video URLs
         for entry in raw_entries:
             if is_playlist_target(entry):
                 try:
@@ -1164,21 +1215,41 @@ def main(argv: list[str] | None = None) -> int:
         queue = [(entry, True) for entry in entries]
 
     active_quality = args.quality or read_settings()["quality"]
-    print(f"Processing {len(queue)} video(s) [Quality: {active_quality}]...")
+    print(
+        f"Processing {len(queue)} video(s) [Quality: {active_quality} | Parallel Pipeline: 1 Downloader + {args.workers} Post-Processors]..."
+    )
     failures = 0
+    post_futures: list[tuple[Future[Path], str, bool]] = []
 
-    for idx, (entry, from_file) in enumerate(queue, start=1):
-        try:
-            print(f"\n--- Video {idx} of {len(queue)} ---")
-            out_folder = process_single_video(entry, args.output_dir, quality=active_quality)
-            if from_file:
-                remove_from_queue(args.queue_file, entry)
-                print(f"  [Queue] Removed '{entry}' from {args.queue_file.name}")
-            render_root_dashboard(args.output_dir, args.queue_file)
-            print(f"  [Done] Output folder: {out_folder}")
-        except Exception as exc:
-            failures += 1
-            print(f"  [Error] Failed processing '{entry}': {exc}", file=sys.stderr)
+    # Producer-Consumer Pipeline:
+    # Main thread downloads Video N+1 while worker pool extracts audio, screenshots & transcripts for Video N
+    with ThreadPoolExecutor(max_workers=max(1, args.workers)) as post_pool:
+        for idx, (entry, from_file) in enumerate(queue, start=1):
+            try:
+                print(f"\n--- [Download {idx}/{len(queue)}] Starting: {entry} ---")
+                bundle = download_stage(entry, args.output_dir, quality=active_quality)
+                print(
+                    f"  [Pipeline] Handing '{bundle['slug'][:28]}' to background post-processor (starting next download immediately)..."
+                )
+                fut = post_pool.submit(postprocess_stage, bundle)
+                post_futures.append((fut, entry, from_file))
+            except Exception as exc:
+                failures += 1
+                print(f"  [Error] Failed downloading '{entry}': {exc}", file=sys.stderr)
+
+        # Wait for all background post-processing tasks to finish
+        for fut, entry, from_file in post_futures:
+            try:
+                out_folder = fut.result()
+                if from_file:
+                    remove_from_queue(args.queue_file, entry)
+                    print(f"  [Queue] Removed '{entry}' from {args.queue_file.name}")
+                with QUEUE_LOCK:
+                    render_root_dashboard(args.output_dir, args.queue_file)
+                print(f"  [Done] Output folder: {out_folder}")
+            except Exception as exc:
+                failures += 1
+                print(f"  [Error] Failed post-processing '{entry}': {exc}", file=sys.stderr)
 
     render_root_dashboard(args.output_dir, args.queue_file)
     return 1 if failures else 0
