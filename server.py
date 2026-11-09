@@ -70,12 +70,25 @@ STATE = PipelineJobState()
 
 
 def check_git_updates(auto_pull: bool = False) -> dict[str, Any]:
-    """Check GitHub origin/main for updates (and optionally fast-forward pull)."""
+    """Check GitHub origin/main for updates (and optionally update tracked files)."""
     git_dir = BASE_DIR / ".git"
-    if not git_dir.exists():
-        return {"behind": 0, "local_sha": "local", "remote_sha": ""}
-
     try:
+        if not git_dir.exists():
+            subprocess.run(
+                ["git", "init", "-q", "-b", "main"],
+                cwd=str(BASE_DIR),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            subprocess.run(
+                ["git", "remote", "add", "origin", GITHUB_REPO],
+                cwd=str(BASE_DIR),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
         subprocess.run(
             ["git", "fetch", "origin", "main", "--quiet"],
             cwd=str(BASE_DIR),
@@ -110,7 +123,7 @@ def check_git_updates(auto_pull: bool = False) -> dict[str, Any]:
         behind = (
             int(behind_res.stdout.strip())
             if behind_res.stdout.strip().isdigit()
-            else 0
+            else (1 if (remote_sha and local_sha != remote_sha) else 0)
         )
 
         if behind > 0 and auto_pull:
@@ -118,7 +131,7 @@ def check_git_updates(auto_pull: bool = False) -> dict[str, Any]:
                 f"[Update] Pulling {behind} new update(s) from GitHub ({remote_sha})..."
             )
             pull_res = subprocess.run(
-                ["git", "pull", "--ff-only", "origin", "main"],
+                ["git", "checkout", "-B", "main", "origin/main", "-f", "-q"],
                 cwd=str(BASE_DIR),
                 capture_output=True,
                 text=True,
@@ -260,6 +273,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.end_headers()
             return
         if clean_path in ("/", "/index.html"):
+            threading.Thread(
+                target=lambda: check_git_updates(auto_pull=True), daemon=True
+            ).start()
             render_root_dashboard(DEFAULT_DOWNLOADS_DIR, DEFAULT_URLS_FILE)
         super().do_GET()
 

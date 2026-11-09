@@ -7,16 +7,26 @@ cd "$SCRIPT_DIR"
 
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
-# 1. Check GitHub for updates on load (if git is available)
+REPO_URL="https://github.com/thatwebsiteisme/yt-videos.git"
+
+# 1. Auto-update from GitHub on load (preserves ignored files: downloads/, urls.txt, settings.json)
 if command -v git >/dev/null 2>&1; then
   if [ ! -d ".git" ]; then
-    echo "[GitHub] Linking folder to https://github.com/thatwebsiteisme/yt-videos.git ..."
-    git init -q
-    git remote add origin https://github.com/thatwebsiteisme/yt-videos.git || true
-    git fetch origin main -q && git branch -M main && git reset --mixed origin/main -q || true
-  else
-    echo "[GitHub] Checking for updates from origin/main..."
-    git fetch origin main -q && git pull --ff-only origin main -q || true
+    echo "[GitHub] Linking folder to $REPO_URL ..."
+    git init -q -b main 2>/dev/null || git init -q
+    git remote add origin "$REPO_URL" 2>/dev/null || git remote set-url origin "$REPO_URL"
+  fi
+  echo "[GitHub] Checking for updates from $REPO_URL ..."
+  if git fetch origin main -q 2>/dev/null; then
+    LOCAL_SHA="$(git rev-parse HEAD 2>/dev/null || echo "")"
+    REMOTE_SHA="$(git rev-parse origin/main 2>/dev/null || echo "")"
+    if [ -n "$REMOTE_SHA" ] && [ "$LOCAL_SHA" != "$REMOTE_SHA" ]; then
+      echo "[GitHub] Updating to latest release (${REMOTE_SHA:0:7})..."
+      git checkout -B main origin/main -f -q
+      echo "[GitHub] ✓ Updated to ${REMOTE_SHA:0:7}"
+    else
+      echo "[GitHub] ✓ Already up to date (${LOCAL_SHA:0:7})"
+    fi
   fi
 fi
 
