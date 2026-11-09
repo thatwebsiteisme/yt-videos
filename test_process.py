@@ -234,17 +234,17 @@ def test_render_root_dashboard(tmp_path: Path) -> None:
 
 def test_quality_settings_default_720p(tmp_path: Path) -> None:
     sfile = tmp_path / "settings.json"
-    assert read_settings(sfile) == {"quality": "720p"}
+    assert read_settings(sfile) == {"quality": "720p", "cookies_browser": "none"}
     assert DEFAULT_QUALITY == "720p"
     assert "720p" in QUALITY_PRESETS
     assert "1080p" in QUALITY_PRESETS
     assert "480p" in QUALITY_PRESETS
     assert "audio" in QUALITY_PRESETS
 
-    save_settings("1080p", sfile)
-    assert read_settings(sfile) == {"quality": "1080p"}
-    save_settings("invalid_preset", sfile)
-    assert read_settings(sfile) == {"quality": "720p"}
+    save_settings("1080p", "chrome", sfile)
+    assert read_settings(sfile) == {"quality": "1080p", "cookies_browser": "chrome"}
+    save_settings("invalid_preset", "invalid_browser", sfile)
+    assert read_settings(sfile) == {"quality": "1080p", "cookies_browser": "chrome"}
 
 
 def test_playlist_detection_and_queue_expansion(tmp_path: Path) -> None:

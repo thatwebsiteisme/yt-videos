@@ -56,13 +56,15 @@ class PipelineJobState:
                 if DEFAULT_URLS_FILE.exists()
                 else ""
             )
+            settings = read_settings()
             return {
                 "version": APP_VERSION,
                 "running": self.running,
                 "logs": "\n".join(self.logs),
                 "queue_text": queue_text,
                 "update_info": self.update_info,
-                "quality": read_settings()["quality"],
+                "quality": settings["quality"],
+                "cookies_browser": settings["cookies_browser"],
             }
 
 
@@ -305,8 +307,15 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._send_json({"ok": True, "update_info": info})
             return
 
-        if "quality" in data and data["quality"]:
-            save_settings(str(data["quality"]))
+        if ("quality" in data and data["quality"]) or (
+            "cookies_browser" in data and data["cookies_browser"]
+        ):
+            save_settings(
+                quality=str(data["quality"]) if data.get("quality") else None,
+                cookies_browser=(
+                    str(data["cookies_browser"]) if data.get("cookies_browser") else None
+                ),
+            )
 
         if "queue_text" in data:
             DEFAULT_URLS_FILE.write_text(str(data["queue_text"]), encoding="utf-8")

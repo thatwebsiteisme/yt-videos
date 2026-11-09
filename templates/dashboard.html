@@ -414,6 +414,11 @@
             <option value="{{ key }}" {% if key == (selected_quality or '720p') %}selected{% endif %}>📦 {{ preset.label }}</option>
             {% endfor %}
           </select>
+          <select id="cookiesSelect" class="sort-select" aria-label="Browser cookies for age-restricted videos" onchange="saveQueueOnly()">
+            {% for key, label in (cookie_options or {}).items() %}
+            <option value="{{ key }}" {% if key == (selected_cookies or 'none') %}selected{% endif %}>🔑 {{ label }}</option>
+            {% endfor %}
+          </select>
           <button id="runBtn" class="btn" onclick="saveAndRun()">▶ Save & Download Now</button>
           <button id="saveBtn" class="btn btn-secondary" onclick="saveQueueOnly()">💾 Save</button>
           <span id="saveStatus" style="font-size: 0.82rem; color: var(--muted);"></span>
@@ -710,6 +715,10 @@
         if (qualitySelect && document.activeElement !== qualitySelect && data.quality) {
           qualitySelect.value = data.quality;
         }
+        const cookiesSelect = document.getElementById('cookiesSelect');
+        if (cookiesSelect && document.activeElement !== cookiesSelect && data.cookies_browser) {
+          cookiesSelect.value = data.cookies_browser;
+        }
 
         const logBox = document.getElementById('logBox');
         if (data.logs) {
@@ -748,12 +757,13 @@
     async function saveQueueOnly() {
       const text = document.getElementById('urlsInput').value;
       const quality = document.getElementById('qualitySelect')?.value || '720p';
+      const cookies_browser = document.getElementById('cookiesSelect')?.value || 'none';
       const status = document.getElementById('saveStatus');
       status.textContent = 'Saving...';
       await fetch('/api/queue', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ queue_text: text, quality })
+        body: JSON.stringify({ queue_text: text, quality, cookies_browser })
       });
       status.textContent = `✓ Saved (${quality})`;
       setTimeout(() => { status.textContent = ''; }, 2500);
@@ -762,10 +772,11 @@
     async function saveAndRun() {
       const text = document.getElementById('urlsInput').value;
       const quality = document.getElementById('qualitySelect')?.value || '720p';
+      const cookies_browser = document.getElementById('cookiesSelect')?.value || 'none';
       await fetch('/api/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ queue_text: text, quality })
+        body: JSON.stringify({ queue_text: text, quality, cookies_browser })
       });
       checkServerStatus();
     }

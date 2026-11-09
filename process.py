@@ -24,14 +24,26 @@ TEMPLATES_DIR = BASE_DIR / "templates"
 DEFAULT_URLS_FILE = BASE_DIR / "urls.txt"
 DEFAULT_DOWNLOADS_DIR = BASE_DIR / "downloads"
 SETTINGS_FILE = BASE_DIR / "settings.json"
-APP_VERSION = "1.2.0"
+COOKIES_FILE = BASE_DIR / "cookies.txt"
+APP_VERSION = "1.3.0"
 DEFAULT_QUALITY = "720p"
+DEFAULT_COOKIES_BROWSER = "none"
 WHISPER_MODEL_REPO = "mlx-community/whisper-turbo"
 BLOCK_INTERVAL_SECONDS = 30.0
 SCENE_THRESHOLD = 0.28
 MIN_SCREENSHOT_GAP_SECONDS = 25.0
 FALLBACK_SCREENSHOT_INTERVAL = 60.0
 MAX_SCREENSHOTS = 40
+
+BROWSER_COOKIE_OPTIONS: dict[str, str] = {
+    "none": "No Browser Cookies (Public Videos)",
+    "chrome": "Google Chrome Cookies (Age-Restricted / Members)",
+    "safari": "Safari Cookies (Age-Restricted / Members)",
+    "firefox": "Firefox Cookies (Age-Restricted / Members)",
+    "brave": "Brave Cookies (Age-Restricted / Members)",
+    "edge": "Microsoft Edge Cookies (Age-Restricted / Members)",
+    "cookies.txt": "Use cookies.txt File in Root Folder",
+}
 
 QUALITY_PRESETS: dict[str, dict[str, str]] = {
     "720p": {
@@ -221,7 +233,10 @@ def replace_playlist_in_queue(
 
 def read_settings(settings_file: Path = SETTINGS_FILE) -> dict[str, Any]:
     """Read persistent settings from settings.json, defaulting quality to 720p."""
-    defaults: dict[str, Any] = {"quality": DEFAULT_QUALITY}
+    defaults: dict[str, Any] = {
+        "quality": DEFAULT_QUALITY,
+        "cookies_browser": DEFAULT_COOKIES_BROWSER,
+    }
     if not settings_file.exists():
         return defaults
     try:
@@ -229,17 +244,41 @@ def read_settings(settings_file: Path = SETTINGS_FILE) -> dict[str, Any]:
         q = str(data.get("quality") or DEFAULT_QUALITY)
         if q not in QUALITY_PRESETS:
             q = DEFAULT_QUALITY
-        return {"quality": q}
+        cb = str(data.get("cookies_browser") or DEFAULT_COOKIES_BROWSER)
+        if cb not in BROWSER_COOKIE_OPTIONS:
+            cb = DEFAULT_COOKIES_BROWSER
+        return {"quality": q, "cookies_browser": cb}
     except Exception:
         return defaults
 
 
-def save_settings(quality: str, settings_file: Path = SETTINGS_FILE) -> dict[str, Any]:
-    """Save chosen download quality preset to settings.json."""
-    q = quality if quality in QUALITY_PRESETS else DEFAULT_QUALITY
-    payload = {"quality": q}
+def save_settings(
+    quality: str | None = None,
+    cookies_browser: str | None = None,
+    settings_file: Path = SETTINGS_FILE,
+) -> dict[str, Any]:
+    """Save chosen download quality preset and cookie source to settings.json."""
+    current = read_settings(settings_file)
+    q = quality if (quality and quality in QUALITY_PRESETS) else current["quality"]
+    cb = (
+        cookies_browser
+        if (cookies_browser and cookies_browser in BROWSER_COOKIE_OPTIONS)
+        else current["cookies_browser"]
+    )
+    payload = {"quality": q, "cookies_browser": cb}
     settings_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return payload
+
+
+def apply_cookie_opts(opts: dict[str, Any], cookies_browser: str | None = None) -> dict[str, Any]:
+    """Attach cookiefile or cookiesfrombrowser to yt-dlp options when configured."""
+    cb = cookies_browser or read_settings().get("cookies_browser", DEFAULT_COOKIES_BROWSER)
+    if cb == "cookies.txt" or (cb == "none" and COOKIES_FILE.exists()):
+        if COOKIES_FILE.exists():
+            opts["cookiefile"] = str(COOKIES_FILE)
+    elif cb and cb != "none":
+        opts["cookiesfrombrowser"] = (cb,)
+    return opts
 
 
 def read_queue(urls_file: Path) -> list[str]:
@@ -891,6 +930,8 @@ def render_root_dashboard(
         queue_text=queue_text,
         selected_quality=settings["quality"],
         quality_presets=QUALITY_PRESETS,
+        selected_cookies=settings["cookies_browser"],
+        cookie_options=BROWSER_COOKIE_OPTIONS,
     )
     output_html.write_text(html, encoding="utf-8")
     return output_html
@@ -982,16 +1023,23 @@ def download_stage(
     url = normalize_youtube_target(raw_entry)
     downloads_dir.mkdir(parents=True, exist_ok=True)
 
-    meta_opts: dict[str, Any] = {
+    meta_opts: dict[str, Any] = apply_cookie_opts({
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
-    }
+    })
     print(f"\n==> [Download Stage] Fetching metadata for: {url} [Format: {chosen_quality}]")
-    with yt_dlp.YoutubeDL(meta_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-        if not info:
-            raise RuntimeError(f"Failed to extract video metadata for {url}")
+    try:
+        with yt_dlp.YoutubeDL(meta_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception as exc:
+        if "Sign in to confirm your age" in str(exc) or "cookies" in str(exc).lower():
+            raise RuntimeError(
+                f"Age-restricted video ({url}). Select your signed-in browser in the '🔑 Cookies' dropdown on the dashboard (or export cookies.txt to the root folder)."
+            ) from exc
+        raise
+    if not info:
+        raise RuntimeError(f"Failed to extract video metadata for {url}")
 
     video_id = info.get("id", "unknown")
     title = info.get("title", "video")
@@ -1011,7 +1059,7 @@ def download_stage(
     if legacy_audio_path.exists() and not audio_path.exists():
         legacy_audio_path.replace(audio_path)
 
-    dl_opts: dict[str, Any] = {
+    dl_opts: dict[str, Any] = apply_cookie_opts({
         "format": preset["format"],
         "outtmpl": str(video_dir / f"{slug}.%(ext)s"),
         "writethumbnail": True,
@@ -1024,7 +1072,7 @@ def download_stage(
         "quiet": False,
         "no_warnings": True,
         "concurrent_fragment_downloads": 4,
-    }
+    })
     if not audio_only:
         dl_opts["merge_output_format"] = "mp4"
 
@@ -1234,6 +1282,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Download quality/type preset (default: 720p or value in settings.json)",
     )
     parser.add_argument(
+        "--cookies-from-browser",
+        choices=list(BROWSER_COOKIE_OPTIONS.keys()),
+        default=None,
+        help="Browser to load YouTube cookies from for age-restricted videos (e.g. chrome, safari, firefox, cookies.txt)",
+    )
+    parser.add_argument(
         "--workers",
         type=int,
         default=2,
@@ -1251,8 +1305,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    if args.quality:
-        save_settings(args.quality)
+    if args.quality or args.cookies_from_browser:
+        save_settings(quality=args.quality, cookies_browser=args.cookies_from_browser)
 
     if args.rebuild_dashboard_only:
         dash = render_root_dashboard(args.output_dir, args.queue_file)
