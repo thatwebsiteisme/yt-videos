@@ -1,0 +1,12 @@
+# Local environments & caches
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+.DS_Store
+
+# Downloaded media & generated local library index
+downloads/
+index.html
+urls.txt
+*.zip

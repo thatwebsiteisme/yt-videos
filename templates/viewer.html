@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ title }} — Local Video Reader</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --panel: #171b24;
+      --panel-hover: #1f2532;
+      --border: #2a3142;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --accent-soft: rgba(88, 166, 255, 0.14);
+      --green: #3fb950;
+      --green-soft: rgba(63, 185, 80, 0.15);
+      --amber: #d29922;
+      --amber-soft: rgba(210, 153, 34, 0.15);
+      --radius: 12px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+    }
+    header {
+      padding: 20px 28px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 1.35rem;
+      font-weight: 700;
+    }
+    .meta-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      font-size: 0.85rem;
+      color: var(--muted);
+      align-items: center;
+    }
+    .pill {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border);
+      padding: 4px 10px;
+      border-radius: 999px;
+      color: var(--text);
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .pill:hover { border-color: var(--accent); }
+    .pill.watched {
+      background: var(--green-soft);
+      border-color: rgba(63, 185, 80, 0.45);
+      color: var(--green);
+      font-weight: 600;
+    }
+    .pill.in-progress {
+      background: var(--amber-soft);
+      border-color: rgba(210, 153, 34, 0.45);
+      color: var(--amber);
+      font-weight: 600;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 440px 1fr;
+      gap: 24px;
+      max-width: 1600px;
+      margin: 0 auto;
+      padding: 24px;
+      align-items: start;
+    }
+    @media (max-width: 1080px) {
+      .layout { grid-template-columns: 1fr; }
+      .sidebar { position: static !important; }
+    }
+    .sidebar {
+      position: sticky;
+      top: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      max-height: calc(100vh - 48px);
+      overflow-y: auto;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+    }
+    video {
+      width: 100%;
+      border-radius: 8px;
+      background: #000;
+      display: block;
+    }
+    audio {
+      width: 100%;
+      margin-top: 10px;
+    }
+    .audio-label {
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-top: 10px;
+      display: block;
+      word-break: break-all;
+    }
+    .watch-bar-wrap {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .watch-bar-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+    .progress-track {
+      width: 100%;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: var(--accent);
+      width: 0%;
+      transition: width 0.2s;
+    }
+    .progress-fill.watched { background: var(--green); }
+    .watch-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .mini-btn {
+      flex: 1;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    .mini-btn:hover { border-color: var(--accent); color: var(--accent); }
+    details summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: var(--accent);
+      user-select: none;
+    }
+    .description-box {
+      margin-top: 10px;
+      white-space: pre-wrap;
+      font-size: 0.88rem;
+      color: var(--muted);
+      max-height: 240px;
+      overflow-y: auto;
+    }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 18px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: var(--bg);
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .tabs {
+      display: flex;
+      gap: 8px;
+    }
+    .tab-btn {
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 8px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-weight: 500;
+    }
+    .tab-btn.active {
+      background: var(--accent-soft);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .search-input {
+      flex: 1;
+      min-width: 220px;
+      max-width: 360px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+    }
+    .t-block {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      margin-bottom: 16px;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .t-block.active-block {
+      border-color: var(--accent);
+      background: var(--panel-hover);
+    }
+    .t-header {
+      margin-bottom: 8px;
+    }
+    .ts-btn {
+      background: var(--accent-soft);
+      color: var(--accent);
+      border: 1px solid rgba(88, 166, 255, 0.35);
+      border-radius: 6px;
+      padding: 3px 9px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .ts-btn:hover {
+      background: var(--accent);
+      color: #0f1117;
+    }
+    .t-shots {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .shot-card {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #000;
+      cursor: pointer;
+    }
+    .shot-card img {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+    .shot-caption {
+      padding: 6px 10px;
+      font-size: 0.78rem;
+      color: var(--muted);
+      background: rgba(255, 255, 255, 0.03);
+      display: flex;
+      justify-content: space-between;
+    }
+    .clean-view p {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 22px;
+      margin-bottom: 16px;
+      font-size: 1.04rem;
+    }
+    .gallery-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 16px;
+    }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <header>
+    <div style="display: flex; align-items: center; gap: 14px;">
+      <a class="pill" href="../../index.html" style="font-weight: 600;">⬅ Library</a>
+      <h1>{{ title }}</h1>
+    </div>
+    <div class="meta-pills">
+      <span id="watchBadge" class="pill">Unwatched</span>
+      <span class="pill">📺 {{ channel }}</span>
+      <span class="pill">📅 {{ upload_date }}</span>
+      <span class="pill">⏱️ {{ duration }}</span>
+      <span class="pill">📝 {{ transcript_source }}</span>
+      <a class="pill" href="{{ webpage_url }}" target="_blank" rel="noopener">🔗 YouTube Original</a>
+      <a class="pill" href="{{ markdown_filename }}" target="_blank">📄 Details .md</a>
+      <a class="pill" href="transcripts/transcript-clean.md" target="_blank">📖 Clean .md</a>
+      <a class="pill" href="transcripts/transcript-timestamped.md" target="_blank">⏱️ Timestamped .md</a>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <div class="card">
+        <video id="player" controls preload="metadata" src="{{ video_filename }}"></video>
+        <span class="audio-label">Audio Track (<code>{{ audio_filename }}</code>):</span>
+        <audio id="audioPlayer" controls preload="none" src="{{ audio_filename }}"></audio>
+
+        <div class="watch-bar-wrap">
+          <div class="watch-bar-top">
+            <span id="watchProgressText">Watched: 00:00:00 / {{ duration }} (0%)</span>
+          </div>
+          <div class="progress-track">
+            <div id="watchProgressBar" class="progress-fill"></div>
+          </div>
+          <div class="watch-actions">
+            <button class="mini-btn" onclick="markWatched(true)">✓ Mark Watched</button>
+            <button class="mini-btn" onclick="markWatched(false)">↺ Reset Progress</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <details>
+          <summary>Video Description</summary>
+          <div class="description-box">{{ description }}</div>
+        </details>
+      </div>
+    </aside>
+
+    <section class="content">
+      <div class="toolbar">
+        <div class="tabs">
+          <button class="tab-btn active" data-target="view-timestamped">Timestamped + Visuals</button>
+          <button class="tab-btn" data-target="view-clean">Clean Reading View</button>
+          <button class="tab-btn" data-target="view-gallery">Screenshots ({{ screenshots|length }})</button>
+        </div>
+        <input type="search" id="searchInput" class="search-input" placeholder="Filter transcript..." />
+      </div>
+
+      <!-- Timestamped + Inline Screenshots View -->
+      <div id="view-timestamped">
+        {% for block in blocks %}
+        <div class="t-block" data-start="{{ block.start }}" data-end="{{ block.end }}">
+          {% if block.screenshots %}
+          <div class="t-shots">
+            {% for shot in block.screenshots %}
+            <div class="shot-card" onclick="seekTo({{ shot.timestamp }})">
+              <img src="{{ shot.rel_path }}" alt="{{ shot.caption }}" loading="lazy" />
+              <div class="shot-caption">
+                <span>{{ shot.caption }}</span>
+                <span>▶ Jump</span>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+          <div class="t-header">
+            <button class="ts-btn" onclick="seekTo({{ block.start }})">▶ {{ block.label }}</button>
+          </div>
+          <div class="t-text">{{ block.text }}</div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <!-- Clean Reading View -->
+      <div id="view-clean" class="clean-view hidden">
+        {% for para in clean_paragraphs %}
+        <p class="searchable-para">{{ para }}</p>
+        {% endfor %}
+      </div>
+
+      <!-- Screenshots Gallery View -->
+      <div id="view-gallery" class="gallery-grid hidden">
+        {% for shot in screenshots %}
+        <div class="shot-card" onclick="seekTo({{ shot.timestamp }})">
+          <img src="{{ shot.rel_path }}" alt="{{ shot.caption }}" loading="lazy" />
+          <div class="shot-caption">
+            <span>{{ shot.caption }}</span>
+            <span>▶ {{ shot.label }}</span>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const VIDEO_ID = {{ video_id|tojson }};
+    const DURATION_SECS = Number({{ duration_seconds|default(0) }}) || 0;
+    const STORAGE_KEY = 'yt_watch_' + VIDEO_ID;
+
+    const player = document.getElementById('player');
+    const blocks = Array.from(document.querySelectorAll('.t-block'));
+    const tabBtns = Array.from(document.querySelectorAll('.tab-btn'));
+    const views = ['view-timestamped', 'view-clean', 'view-gallery'];
+    const searchInput = document.getElementById('searchInput');
+    const watchBadge = document.getElementById('watchBadge');
+    const watchProgressText = document.getElementById('watchProgressText');
+    const watchProgressBar = document.getElementById('watchProgressBar');
+
+    let lastSavedSec = -1;
+
+    function formatTime(secs) {
+      const total = Math.max(0, Math.floor(secs || 0));
+      const h = String(Math.floor(total / 3600)).padStart(2, '0');
+      const m = String(Math.floor((total % 3600) / 60)).padStart(2, '0');
+      const s = String(total % 60).padStart(2, '0');
+      return `${h}:${m}:${s}`;
+    }
+
+    function loadWatchState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) return JSON.parse(raw);
+      } catch (e) {}
+      return { watched_seconds: 0, watched_percent: 0, watch_status: 'unwatched', last_watched_at: '' };
+    }
+
+    function updateWatchUI(state) {
+      const pct = Math.min(100, Math.max(0, Math.round(state.watched_percent || 0)));
+      const dur = DURATION_SECS || (player.duration || 0);
+      watchProgressText.textContent = `Watched: ${formatTime(state.watched_seconds)} / ${formatTime(dur)} (${pct}%)`;
+      watchProgressBar.style.width = `${pct}%`;
+
+      watchBadge.className = 'pill';
+      watchProgressBar.className = 'progress-fill';
+
+      if (state.watch_status === 'watched' || pct >= 90) {
+        watchBadge.textContent = `✓ Watched (${pct}%)`;
+        watchBadge.classList.add('watched');
+        watchProgressBar.classList.add('watched');
+      } else if (state.watched_seconds >= 5 || pct > 0) {
+        watchBadge.textContent = `⏳ In Progress (${pct}%)`;
+        watchBadge.classList.add('in-progress');
+      } else {
+        watchBadge.textContent = 'Unwatched';
+      }
+    }
+
+    async function persistWatchState(state, forceServerSync = false) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      } catch (e) {}
+      updateWatchUI(state);
+
+      if (window.location.protocol.startsWith('http') && (forceServerSync || Math.abs(state.watched_seconds - lastSavedSec) >= 5)) {
+        lastSavedSec = state.watched_seconds;
+        try {
+          await fetch('/api/watch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              video_id: VIDEO_ID,
+              watched_seconds: state.watched_seconds,
+              duration_seconds: DURATION_SECS || player.duration || 0,
+              watch_status: state.watch_status
+            })
+          });
+        } catch (e) {}
+      }
+    }
+
+    function markWatched(isWatched) {
+      const dur = DURATION_SECS || player.duration || 0;
+      const state = isWatched
+        ? {
+            watched_seconds: dur,
+            watched_percent: 100,
+            watch_status: 'watched',
+            last_watched_at: new Date().toISOString()
+          }
+        : {
+            watched_seconds: 0,
+            watched_percent: 0,
+            watch_status: 'unwatched',
+            last_watched_at: ''
+          };
+      persistWatchState(state, true);
+    }
+
+    function seekTo(seconds) {
+      if (!player) return;
+      player.currentTime = seconds;
+      player.play();
+    }
+
+    // Restore playback position on load
+    const initialState = loadWatchState();
+    updateWatchUI(initialState);
+    player.addEventListener('loadedmetadata', () => {
+      if (initialState.watched_seconds > 5 && initialState.watch_status !== 'watched') {
+        player.currentTime = initialState.watched_seconds;
+      }
+      updateWatchUI(initialState);
+    });
+
+    // Track watch time & highlight active transcript block during video playback
+    player.addEventListener('timeupdate', () => {
+      const t = player.currentTime;
+      const dur = DURATION_SECS || player.duration || 1;
+      for (const el of blocks) {
+        const start = parseFloat(el.dataset.start || '0');
+        const end = parseFloat(el.dataset.end || '999999');
+        if (t >= start && t < end) {
+          el.classList.add('active-block');
+        } else {
+          el.classList.remove('active-block');
+        }
+      }
+
+      if (t > 1) {
+        const current = loadWatchState();
+        const maxWatched = Math.max(t, current.watched_seconds || 0);
+        const pct = Math.min(100, (maxWatched / dur) * 100);
+        const status = (pct >= 90 || current.watch_status === 'watched')
+          ? 'watched'
+          : (maxWatched >= 5 ? 'in_progress' : 'unwatched');
+        persistWatchState({
+          watched_seconds: Math.round(maxWatched),
+          watched_percent: Math.round(pct * 10) / 10,
+          watch_status: status,
+          last_watched_at: new Date().toISOString()
+        });
+      }
+    });
+
+    player.addEventListener('ended', () => {
+      markWatched(true);
+    });
+
+    // Tab switching
+    tabBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        tabBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const target = btn.dataset.target;
+        views.forEach(v => {
+          document.getElementById(v).classList.toggle('hidden', v !== target);
+        });
+      });
+    });
+
+    // Instant live search filter
+    searchInput.addEventListener('input', () => {
+      const q = searchInput.value.trim().toLowerCase();
+      blocks.forEach(el => {
+        const text = el.innerText.toLowerCase();
+        el.classList.toggle('hidden', q !== '' && !text.includes(q));
+      });
+      document.querySelectorAll('.searchable-para').forEach(p => {
+        const text = p.innerText.toLowerCase();
+        p.classList.toggle('hidden', q !== '' && !text.includes(q));
+      });
+    });
+  </script>
+</body>
+</html>

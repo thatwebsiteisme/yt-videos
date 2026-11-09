@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YouTube Local Library & Downloader</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --panel: #171b24;
+      --panel-hover: #1f2532;
+      --border: #2a3142;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --accent-soft: rgba(88, 166, 255, 0.14);
+      --green: #3fb950;
+      --green-soft: rgba(63, 185, 80, 0.15);
+      --amber: #d29922;
+      --amber-soft: rgba(210, 153, 34, 0.15);
+      --radius: 12px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    header {
+      padding: 20px 32px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 1.4rem;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .status-badge {
+      font-size: 0.78rem;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-weight: 600;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--muted);
+    }
+    .status-badge.online {
+      color: var(--green);
+      background: var(--green-soft);
+      border-color: rgba(63, 185, 80, 0.4);
+    }
+    .status-badge.update-btn {
+      color: var(--amber);
+      background: var(--amber-soft);
+      border-color: rgba(210, 153, 34, 0.5);
+      cursor: pointer;
+    }
+    .container {
+      max-width: 1500px;
+      margin: 0 auto;
+      padding: 28px 32px;
+    }
+    .control-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 28px;
+    }
+    @media (max-width: 960px) {
+      .control-grid { grid-template-columns: 1fr; }
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+    .card h2 {
+      margin: 0 0 12px 0;
+      font-size: 1.05rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    textarea {
+      width: 100%;
+      min-height: 115px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.88rem;
+      resize: vertical;
+    }
+    .btn-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 12px;
+      align-items: center;
+    }
+    .btn {
+      background: var(--accent);
+      color: #0f1117;
+      border: none;
+      padding: 9px 16px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.9rem;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn:hover { opacity: 0.92; }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .btn-secondary {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover { border-color: var(--accent); }
+    .log-box {
+      background: #090b0f;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      height: 165px;
+      overflow-y: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.8rem;
+      color: #a5d6ff;
+      white-space: pre-wrap;
+    }
+    .offline-banner {
+      background: rgba(210, 153, 34, 0.12);
+      border: 1px solid rgba(210, 153, 34, 0.4);
+      color: #e3b341;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 0.88rem;
+      margin-bottom: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 20px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      padding: 14px 18px;
+      border-radius: var(--radius);
+    }
+    .filter-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .filter-pill {
+      background: var(--bg);
+      color: var(--muted);
+      border: 1px solid var(--border);
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 0.84rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .filter-pill.active {
+      background: var(--accent-soft);
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+    .controls-right {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+    .sort-select {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 0.88rem;
+    }
+    .search-input {
+      min-width: 240px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+    }
+    .video-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+      gap: 22px;
+    }
+    .v-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: transform 0.15s, border-color 0.15s;
+    }
+    .v-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-2px);
+    }
+    .v-thumb {
+      position: relative;
+      aspect-ratio: 16 / 9;
+      background: #000;
+      overflow: hidden;
+      display: block;
+    }
+    .v-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .v-duration {
+      position: absolute;
+      bottom: 10px;
+      right: 8px;
+      background: rgba(0, 0, 0, 0.82);
+      color: #fff;
+      padding: 2px 7px;
+      border-radius: 5px;
+      font-size: 0.78rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .v-watch-badge {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      background: rgba(15, 17, 23, 0.88);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .v-watch-badge.watched {
+      background: rgba(20, 45, 28, 0.92);
+      border-color: rgba(63, 185, 80, 0.5);
+      color: var(--green);
+    }
+    .v-watch-badge.in_progress {
+      background: rgba(48, 36, 14, 0.92);
+      border-color: rgba(210, 153, 34, 0.5);
+      color: var(--amber);
+    }
+    .v-progress-bar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.18);
+    }
+    .v-progress-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--accent);
+    }
+    .v-progress-fill.watched { background: var(--green); }
+    .v-body {
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      gap: 10px;
+    }
+    .v-title {
+      margin: 0;
+      font-size: 1.05rem;
+      font-weight: 600;
+      line-height: 1.4;
+    }
+    .v-title a {
+      color: var(--text);
+      text-decoration: none;
+    }
+    .v-title a:hover { color: var(--accent); }
+    .v-meta {
+      font-size: 0.82rem;
+      color: var(--muted);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .v-watch-info {
+      font-size: 0.8rem;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .toggle-watch-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      border-radius: 6px;
+      padding: 2px 8px;
+      font-size: 0.75rem;
+      cursor: pointer;
+    }
+    .toggle-watch-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .v-links {
+      margin-top: auto;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .pill-link {
+      font-size: 0.8rem;
+      padding: 5px 10px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border);
+      color: var(--text);
+      text-decoration: none;
+    }
+    .pill-link:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .pill-link.primary {
+      background: var(--accent-soft);
+      border-color: rgba(88, 166, 255, 0.4);
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--muted);
+      border: 1px dashed var(--border);
+      border-radius: var(--radius);
+    }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>
+      <span>🎬 Local YouTube Library</span>
+      <span id="modeBadge" class="status-badge">Static Library Mode (file://)</span>
+      <button id="updateBadge" class="status-badge update-btn hidden" onclick="pullGitHubUpdate()">⬇ Update Available (Click to Update)</button>
+    </h1>
+    <div style="font-size: 0.88rem; color: var(--muted); display: flex; gap: 16px; align-items: center;">
+      <span id="gitStatusText"></span>
+      <span>Total: <strong style="color: var(--text);">{{ videos|length }}</strong> video(s)</span>
+    </div>
+  </header>
+
+  <div class="container">
+    <div id="offlineNotice" class="offline-banner">
+      <div>
+        💡 <strong>Viewing offline via Finder (`file://`):</strong> You can browse, filter by watch status, sort, and watch all downloaded videos below. To add URLs and trigger downloads from this webpage, double-click <code>Download.command</code> in the root folder.
+      </div>
+    </div>
+
+    <!-- Interactive Downloader Panel (Active when opened via Download.command) -->
+    <div id="interactivePanel" class="control-grid hidden">
+      <div class="card">
+        <h2>
+          <span>📥 Download Queue (<code>urls.txt</code>)</span>
+          <span id="queueCount" style="font-size: 0.8rem; color: var(--muted);"></span>
+        </h2>
+        <textarea id="urlsInput" placeholder="Paste YouTube URLs or 11-char Video IDs here (one per line)...">{{ queue_text }}</textarea>
+        <div class="btn-row">
+          <button id="runBtn" class="btn" onclick="saveAndRun()">▶ Save & Download Now</button>
+          <button id="saveBtn" class="btn btn-secondary" onclick="saveQueueOnly()">💾 Save urls.txt</button>
+          <span id="saveStatus" style="font-size: 0.82rem; color: var(--muted);"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>
+          <span>⚡ Live Pipeline Output</span>
+          <span id="jobState" style="font-size: 0.8rem; color: var(--muted);">Idle</span>
+        </h2>
+        <div id="logBox" class="log-box">Ready. Paste URLs on the left and click "Save & Download Now".</div>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <div class="filter-pills">
+        <button class="filter-pill active" data-filter="all">All (<span id="count-all">{{ videos|length }}</span>)</button>
+        <button class="filter-pill" data-filter="unwatched">Unwatched (<span id="count-unwatched">0</span>)</button>
+        <button class="filter-pill" data-filter="in_progress">In Progress (<span id="count-in_progress">0</span>)</button>
+        <button class="filter-pill" data-filter="watched">Watched (<span id="count-watched">0</span>)</button>
+      </div>
+
+      <div class="controls-right">
+        <select id="sortSelect" class="sort-select" aria-label="Sort videos">
+          <option value="date_desc">Sort: Upload Date (Newest)</option>
+          <option value="date_asc">Sort: Upload Date (Oldest)</option>
+          <option value="watched_desc">Sort: Watch Progress (High → Low)</option>
+          <option value="watched_asc">Sort: Watch Progress (Low → High)</option>
+          <option value="recent_watched">Sort: Recently Watched</option>
+          <option value="duration_desc">Sort: Duration (Longest)</option>
+          <option value="duration_asc">Sort: Duration (Shortest)</option>
+          <option value="title_asc">Sort: Title (A → Z)</option>
+        </select>
+        <input type="search" id="searchInput" class="search-input" placeholder="Search title, channel, ID..." />
+      </div>
+    </div>
+
+    {% if videos %}
+    <div id="videoGrid" class="video-grid">
+      {% for v in videos %}
+      <article
+        class="v-card"
+        data-video-id="{{ v.video_id }}"
+        data-title="{{ v.title|lower }}"
+        data-search="{{ v.title|lower }} {{ v.channel|lower }} {{ v.video_id|lower }}"
+        data-date="{{ v.upload_date }}"
+        data-duration="{{ v.duration_seconds }}"
+        data-watched-sec="{{ v.watched_seconds }}"
+        data-watched-pct="{{ v.watched_percent }}"
+        data-watch-status="{{ v.watch_status }}"
+        data-last-watched="{{ v.last_watched_at }}"
+      >
+        <a class="v-thumb" href="{{ v.viewer_rel }}">
+          {% if v.thumb_rel %}
+          <img src="{{ v.thumb_rel }}" alt="{{ v.title }}" loading="lazy" />
+          {% endif %}
+          <span class="v-watch-badge {{ v.watch_status }}" data-role="badge">
+            {% if v.watch_status == 'watched' %}✓ Watched{% elif v.watch_status == 'in_progress' %}⏳ {{ v.watched_percent|int }}%{% else %}Unwatched{% endif %}
+          </span>
+          <span class="v-duration">{{ v.duration }}</span>
+          <div class="v-progress-bar">
+            <div class="v-progress-fill {% if v.watch_status == 'watched' %}watched{% endif %}" data-role="fill" style="width: {{ v.watched_percent }}%;"></div>
+          </div>
+        </a>
+        <div class="v-body">
+          <h3 class="v-title">
+            <a href="{{ v.viewer_rel }}">{{ v.title }}</a>
+          </h3>
+          <div class="v-meta">
+            <span>📺 {{ v.channel }}</span>
+            <span>📅 {{ v.upload_date }}</span>
+            <span>🖼️ {{ v.screenshots_count }} shots</span>
+          </div>
+          <div class="v-watch-info">
+            <span data-role="watch-text">⏱️ Watched: {{ v.watched_label }} / {{ v.duration }} ({{ v.watched_percent|int }}%)</span>
+            <button class="toggle-watch-btn" onclick="toggleCardWatched('{{ v.video_id }}', {{ v.duration_seconds }})">✓ Toggle Watched</button>
+          </div>
+          <div class="v-links">
+            <a class="pill-link primary" href="{{ v.viewer_rel }}">▶ Open Player</a>
+            <a class="pill-link" href="{{ v.details_md_rel }}" target="_blank">📄 Details</a>
+            <a class="pill-link" href="{{ v.clean_md_rel }}" target="_blank">📖 Clean Text</a>
+            <a class="pill-link" href="{{ v.ts_md_rel }}" target="_blank">⏱️ Timestamped</a>
+          </div>
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <h3>No videos downloaded yet</h3>
+      <p>Add YouTube URLs or IDs to <code>urls.txt</code> and run <code>./run.sh</code> (or launch <code>Download.command</code>).</p>
+    </div>
+    {% endif %}
+  </div>
+
+  <script>
+    const searchInput = document.getElementById('searchInput');
+    const sortSelect = document.getElementById('sortSelect');
+    const filterPills = Array.from(document.querySelectorAll('.filter-pill'));
+    const videoGrid = document.getElementById('videoGrid');
+    const cards = Array.from(document.querySelectorAll('.v-card'));
+    const isServerMode = window.location.protocol.startsWith('http');
+
+    let activeFilter = 'all';
+
+    function formatTime(secs) {
+      const total = Math.max(0, Math.floor(secs || 0));
+      const h = String(Math.floor(total / 3600)).padStart(2, '0');
+      const m = String(Math.floor((total % 3600) / 60)).padStart(2, '0');
+      const s = String(total % 60).padStart(2, '0');
+      return `${h}:${m}:${s}`;
+    }
+
+    // Hydrate watch progress from localStorage (merges with metadata.json values)
+    function hydrateWatchProgress() {
+      const counts = { all: cards.length, unwatched: 0, in_progress: 0, watched: 0 };
+
+      cards.forEach(card => {
+        const vid = card.dataset.videoId;
+        const dur = parseFloat(card.dataset.duration || '0');
+        let watchedSec = parseFloat(card.dataset.watchedSec || '0');
+        let watchedPct = parseFloat(card.dataset.watchedPct || '0');
+        let status = card.dataset.watchStatus || 'unwatched';
+        let lastWatched = card.dataset.lastWatched || '';
+
+        try {
+          const localRaw = localStorage.getItem('yt_watch_' + vid);
+          if (localRaw) {
+            const local = JSON.parse(localRaw);
+            if ((local.last_watched_at || '') >= lastWatched || (local.watched_seconds || 0) > watchedSec) {
+              watchedSec = Number(local.watched_seconds || 0);
+              watchedPct = Number(local.watched_percent || 0);
+              status = local.watch_status || 'unwatched';
+              lastWatched = local.last_watched_at || '';
+            }
+          }
+        } catch (e) {}
+
+        card.dataset.watchedSec = String(watchedSec);
+        card.dataset.watchedPct = String(watchedPct);
+        card.dataset.watchStatus = status;
+        card.dataset.lastWatched = lastWatched;
+
+        counts[status] = (counts[status] || 0) + 1;
+
+        const badge = card.querySelector('[data-role="badge"]');
+        const fill = card.querySelector('[data-role="fill"]');
+        const textEl = card.querySelector('[data-role="watch-text"]');
+        const pctInt = Math.min(100, Math.round(watchedPct));
+
+        if (badge) {
+          badge.className = 'v-watch-badge ' + status;
+          badge.textContent = status === 'watched'
+            ? '✓ Watched'
+            : (status === 'in_progress' ? `⏳ ${pctInt}%` : 'Unwatched');
+        }
+        if (fill) {
+          fill.style.width = `${pctInt}%`;
+          fill.classList.toggle('watched', status === 'watched');
+        }
+        if (textEl) {
+          textEl.textContent = `⏱️ Watched: ${formatTime(watchedSec)} / ${formatTime(dur)} (${pctInt}%)`;
+        }
+      });
+
+      document.getElementById('count-all').textContent = String(counts.all);
+      document.getElementById('count-unwatched').textContent = String(counts.unwatched);
+      document.getElementById('count-in_progress').textContent = String(counts.in_progress);
+      document.getElementById('count-watched').textContent = String(counts.watched);
+    }
+
+    function applyFilterAndSort() {
+      const q = (searchInput?.value || '').trim().toLowerCase();
+      const sortBy = sortSelect?.value || 'date_desc';
+
+      cards.forEach(c => {
+        const hay = c.dataset.search || '';
+        const status = c.dataset.watchStatus || 'unwatched';
+        const matchSearch = q === '' || hay.includes(q);
+        const matchFilter = activeFilter === 'all' || status === activeFilter;
+        c.classList.toggle('hidden', !(matchSearch && matchFilter));
+      });
+
+      if (!videoGrid) return;
+      const sorted = [...cards].sort((a, b) => {
+        if (sortBy === 'date_desc') return (b.dataset.date || '').localeCompare(a.dataset.date || '');
+        if (sortBy === 'date_asc') return (a.dataset.date || '').localeCompare(b.dataset.date || '');
+        if (sortBy === 'watched_desc') return parseFloat(b.dataset.watchedPct || '0') - parseFloat(a.dataset.watchedPct || '0');
+        if (sortBy === 'watched_asc') return parseFloat(a.dataset.watchedPct || '0') - parseFloat(b.dataset.watchedPct || '0');
+        if (sortBy === 'recent_watched') return (b.dataset.lastWatched || '').localeCompare(a.dataset.lastWatched || '');
+        if (sortBy === 'duration_desc') return parseFloat(b.dataset.duration || '0') - parseFloat(a.dataset.duration || '0');
+        if (sortBy === 'duration_asc') return parseFloat(a.dataset.duration || '0') - parseFloat(b.dataset.duration || '0');
+        if (sortBy === 'title_asc') return (a.dataset.title || '').localeCompare(b.dataset.title || '');
+        return 0;
+      });
+      sorted.forEach(c => videoGrid.appendChild(c));
+    }
+
+    async function toggleCardWatched(videoId, durationSecs) {
+      const card = cards.find(c => c.dataset.videoId === videoId);
+      const currentStatus = card ? card.dataset.watchStatus : 'unwatched';
+      const nextWatched = currentStatus !== 'watched';
+      const state = nextWatched
+        ? {
+            watched_seconds: durationSecs,
+            watched_percent: 100,
+            watch_status: 'watched',
+            last_watched_at: new Date().toISOString()
+          }
+        : {
+            watched_seconds: 0,
+            watched_percent: 0,
+            watch_status: 'unwatched',
+            last_watched_at: new Date().toISOString()
+          };
+      try {
+        localStorage.setItem('yt_watch_' + videoId, JSON.stringify(state));
+      } catch (e) {}
+
+      if (isServerMode) {
+        try {
+          await fetch('/api/watch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              video_id: videoId,
+              watched_seconds: state.watched_seconds,
+              duration_seconds: durationSecs,
+              watch_status: state.watch_status
+            })
+          });
+        } catch (e) {}
+      }
+      hydrateWatchProgress();
+      applyFilterAndSort();
+    }
+
+    filterPills.forEach(pill => {
+      pill.addEventListener('click', () => {
+        filterPills.forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+        activeFilter = pill.dataset.filter || 'all';
+        applyFilterAndSort();
+      });
+    });
+
+    searchInput?.addEventListener('input', applyFilterAndSort);
+    sortSelect?.addEventListener('change', applyFilterAndSort);
+
+    hydrateWatchProgress();
+    applyFilterAndSort();
+
+    let pollTimer = null;
+    let wasRunning = false;
+
+    async function checkServerStatus() {
+      if (!isServerMode) return;
+      try {
+        const res = await fetch('/api/status');
+        if (!res.ok) return;
+        const data = await res.json();
+
+        document.getElementById('offlineNotice').classList.add('hidden');
+        document.getElementById('interactivePanel').classList.remove('hidden');
+        const badge = document.getElementById('modeBadge');
+        badge.textContent = '● Live App Mode';
+        badge.classList.add('online');
+
+        if (data.update_info) {
+          const gitText = document.getElementById('gitStatusText');
+          const updateBtn = document.getElementById('updateBadge');
+          if (data.update_info.behind > 0) {
+            updateBtn.classList.remove('hidden');
+            updateBtn.textContent = `⬇ Update Available (${data.update_info.behind} new commit${data.update_info.behind > 1 ? 's' : ''})`;
+          } else {
+            updateBtn.classList.add('hidden');
+            gitText.textContent = `✓ GitHub Up to Date (${data.update_info.local_sha || 'main'})`;
+          }
+        }
+
+        const urlsInput = document.getElementById('urlsInput');
+        if (document.activeElement !== urlsInput && !data.running) {
+          urlsInput.value = data.queue_text;
+        }
+
+        const logBox = document.getElementById('logBox');
+        if (data.logs) {
+          logBox.textContent = data.logs;
+          logBox.scrollTop = logBox.scrollHeight;
+        }
+
+        const runBtn = document.getElementById('runBtn');
+        const jobState = document.getElementById('jobState');
+        if (data.running) {
+          wasRunning = true;
+          runBtn.disabled = true;
+          runBtn.textContent = '⏳ Downloading & Transcribing...';
+          jobState.textContent = 'Running...';
+          jobState.style.color = '#3fb950';
+        } else {
+          runBtn.disabled = false;
+          runBtn.textContent = '▶ Save & Download Now';
+          jobState.textContent = 'Idle';
+          jobState.style.color = '#8b949e';
+          if (wasRunning) {
+            wasRunning = false;
+            window.location.reload();
+          }
+        }
+      } catch (e) {}
+    }
+
+    async function pullGitHubUpdate() {
+      const btn = document.getElementById('updateBadge');
+      btn.textContent = '⏳ Updating from GitHub...';
+      await fetch('/api/update', { method: 'POST' });
+      window.location.reload();
+    }
+
+    async function saveQueueOnly() {
+      const text = document.getElementById('urlsInput').value;
+      const status = document.getElementById('saveStatus');
+      status.textContent = 'Saving...';
+      await fetch('/api/queue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ queue_text: text })
+      });
+      status.textContent = '✓ Saved urls.txt';
+      setTimeout(() => { status.textContent = ''; }, 2500);
+    }
+
+    async function saveAndRun() {
+      const text = document.getElementById('urlsInput').value;
+      await fetch('/api/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ queue_text: text })
+      });
+      checkServerStatus();
+    }
+
+    if (isServerMode) {
+      checkServerStatus();
+      pollTimer = setInterval(checkServerStatus, 1500);
+    }
+  </script>
+</body>
+</html>
