@@ -265,9 +265,26 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _detect_browser_from_ua(self) -> str | None:
+        ua = (self.headers.get("User-Agent") or "").lower()
+        if "firefox/" in ua:
+            return "firefox"
+        if "edg/" in ua or "edge/" in ua:
+            return "edge"
+        if "brave/" in ua:
+            return "brave"
+        if "chrome/" in ua or "crios/" in ua:
+            return "chrome"
+        if "safari/" in ua and "chrome/" not in ua:
+            return "safari"
+        return None
+
     def do_GET(self) -> None:
         clean_path = self.path.split("?", 1)[0]
         if clean_path == "/api/status":
+            det = self._detect_browser_from_ua()
+            if det:
+                save_settings(detected_browser=det)
             self._send_json(STATE.snapshot())
             return
         if clean_path in ("/favicon.ico", "/robots.txt"):
